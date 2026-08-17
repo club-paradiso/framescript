@@ -58,6 +58,14 @@ textarea {
   color: inherit;
 }
 
+/* Native controls follow the product accent rather than the browser's blue,
+   so the one accent colour stays the one accent colour. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--fs-accent);
+}
+
 /* Focus is always visible. Removing it would make the whole product
    keyboard-hostile, and every primary action here has a keyboard path. */
 :focus-visible {

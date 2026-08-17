@@ -9,8 +9,28 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onRuntimeMessage, sendRuntime } from '../messaging/bus';
 import type { AnalysisStatus, SessionSnapshot, WorkerToUi } from '../messaging/protocol';
 import { settingsStore } from '../settings/store';
-import { DEFAULT_SETTINGS, type FrameScriptSettings } from '../settings/types';
+import { DEFAULT_SETTINGS, mergeSettings, type FrameScriptSettings } from '../settings/types';
 import type { DeepPartial } from '../settings/store';
+
+/** Recursively applies a partial patch, used for the optimistic update below. */
+function applyPatch<T extends Record<string, unknown>>(base: T, patch: DeepPartial<T>): T {
+  const out: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    const existing = out[key];
+    const bothPlainObjects =
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      existing !== null &&
+      typeof existing === 'object' &&
+      !Array.isArray(existing);
+    out[key] = bothPlainObjects
+      ? applyPatch(existing as Record<string, unknown>, value as Record<string, unknown>)
+      : value;
+  }
+  return out as T;
+}
 
 /** The tab the UI is acting on: the active YouTube/Netflix tab. */
 export function useActiveTabId(): number | undefined {
@@ -54,7 +74,22 @@ export function useSettings(): {
     };
   }, []);
 
+  /**
+   * Applies a settings change optimistically, then persists it.
+   *
+   * The local state updates before the storage write completes. Without this a
+   * controlled input reverts to its previous value for the duration of the
+   * round-trip, so a click on a radio or checkbox visibly fails to register
+   * before snapping into place. Persisting still happens, and the store's own
+   * emit reconciles the final merged value.
+   */
   const update = useCallback(async (patch: DeepPartial<FrameScriptSettings>) => {
+    setSettings((current) =>
+      mergeSettings(
+        applyPatch(current as unknown as Record<string, unknown>, patch as Record<string, unknown>) as
+          Partial<FrameScriptSettings>,
+      ),
+    );
     const next = await settingsStore.update(patch);
     setSettings(next);
   }, []);
