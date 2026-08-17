@@ -163,10 +163,13 @@ npm run dev         # extension watch build
 npm run dev:web     # Studio dev server
 npm run typecheck   # tsc, both project configs
 npm run lint        # eslint, zero warnings tolerated
-npm test            # vitest — 433 tests
+npm test            # vitest — 444 tests
 npm run verify      # typecheck + lint + test + build
 npm run build:all   # extension + Studio + CLI/MCP
-npm run test:e2e    # Playwright: extension and Studio in real Chrome
+npm run test:e2e    # Playwright — 20 tests in real Chrome
+npm run check:mcp   # MCP server over its real stdio transport
+npm run benchmark   # engine throughput + structural invariants
+npm run fixtures    # regenerate the synthetic media fixtures
 ```
 
 ### Building each surface
@@ -177,13 +180,30 @@ npm run build:web    # Studio     -> dist-web/    (static, deploy anywhere)
 npm run build:tools  # CLI + MCP  -> dist-tools/
 ```
 
+None of those output directories are committed — a hash-named bundle in git
+churns on every build and leaves orphans behind. The CLI and MCP server are
+what `bin` points at, so `npm run build:tools` runs from `prepare`, which means
+installing this package straight from git still gets you working executables.
+
 Most of the interesting logic — quality ranking, temporal heuristics, DSP,
 fusion, scene building, rendering, export — is pure and has no browser
 dependency. That is deliberate: it is what makes the reconstruction pipeline
 testable without a streaming session.
 
-`tests/dom/` runs against a hand-built synthetic player fixture in jsdom. No
-copyrighted markup or media appears anywhere in the test suite.
+`tests/dom/` runs against a hand-built synthetic player fixture in jsdom. The
+audio fixture is a WAV synthesised from first principles by
+`scripts/make-fixture-media.mjs` — two distinct synthetic voices, a silence, and
+an impact — regenerated in CI and diffed, so the generator cannot drift from
+what the tests assume. No copyrighted markup or media appears anywhere in the
+test suite.
+
+`npm run test:coverage` reports ~64% of statements overall, but that single
+number is misleading in both directions. The pure logic — DSP, temporal
+heuristics, quality ranking, fusion, scene building, export — sits between 80%
+and 100%. The modules reporting 0% are browser glue: the service worker,
+the offscreen document, the content-script entry points, the platform adapters.
+Those are exercised by the Playwright suite and by manual QA, not by vitest,
+because mocking Chrome well enough to cover them would test the mock.
 
 ## AI and BYOK
 

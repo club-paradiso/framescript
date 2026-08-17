@@ -226,3 +226,52 @@ test('lays out on a phone viewport without horizontal scrolling', async () => {
   );
   expect(overflow).toBeLessThanOrEqual(1);
 });
+
+/**
+ * Analysis of a real media file, through the browser.
+ *
+ * The Node test in `tests/mediaAnalysis.test.ts` runs the engine over the same
+ * fixture directly. This one goes through the app: File API intake,
+ * `decodeAudioData`, the offline audio pass, and the resulting screenplay —
+ * the path a user actually takes, and the only way to exercise the browser
+ * codec layer.
+ */
+test('analyzes a real audio file end to end', async () => {
+  const wav = readFileSync(fileURLToPath(new URL('../tests/fixtures/fixture-speech.wav', import.meta.url)));
+
+  await page.setInputFiles('#framescript-file-input', [
+    { name: 'fixture-speech.wav', mimeType: 'audio/wav', buffer: wav },
+  ]);
+
+  // The file is recognised as media and offered for analysis, not parsed as text.
+  // The name appears both in the sources list and on the analyzer card, so the
+  // locator is scoped to the card rather than made ambiguous.
+  const analyzer = page.locator('.card', { hasText: 'Analyze media' });
+  await expect(analyzer).toBeVisible();
+  await expect(analyzer.getByText('fixture-speech.wav')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Analyze', exact: true }).click();
+
+  // Decoding 14 s and running the full offline pass takes a moment.
+  await expect(page.getByText(/Analyzed:/)).toBeVisible({ timeout: 45_000 });
+
+  const summary = await page.getByText(/Analyzed:/).textContent();
+  // The fixture holds exactly two utterances from two voices.
+  expect(summary).toMatch(/2 speech regions/);
+  expect(summary).toMatch(/2 speakers/);
+
+  // Those became evidence, and evidence became a screenplay.
+  const stats = page.locator('.stats');
+  await expect(stats.locator('.stats__item', { hasText: 'Sound' }).locator('dd')).not.toHaveText('0');
+});
+
+test('reports honestly that local analysis does not transcribe or describe', async () => {
+  const wav = readFileSync(fileURLToPath(new URL('../tests/fixtures/fixture-speech.wav', import.meta.url)));
+  await page.setInputFiles('#framescript-file-input', [
+    { name: 'fixture-speech.wav', mimeType: 'audio/wav', buffer: wav },
+  ]);
+
+  // The limit is stated before the user runs anything and wonders where the
+  // dialogue went.
+  await expect(page.getByText(/does not transcribe speech or describe what is visible/i)).toBeVisible();
+});

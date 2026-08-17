@@ -1,9 +1,30 @@
 # Manual QA
 
-The automated suite (400 tests) covers deterministic logic against synthetic
-fixtures. It **cannot** verify that selectors still match today's YouTube, that
-tab capture behaves on real media, or anything requiring an authenticated
-Netflix account.
+## What the automated suite already covers
+
+Run all of it before starting a manual pass — there is no point testing a build
+by hand that fails on its own.
+
+```bash
+npm run verify        # typecheck, lint, 444 unit tests, all three builds
+npm run check:mcp     # MCP server over its real stdio transport
+npm run benchmark     # engine throughput + structural invariants
+npx playwright test   # 20 end-to-end tests: 7 extension, 13 Studio
+```
+
+If the environment already ships a Chromium that Playwright did not install,
+point at it rather than downloading another:
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npx playwright test
+```
+
+## What it cannot cover
+
+None of the above verifies that selectors still match today's YouTube, that tab
+capture behaves on real media, or anything requiring an authenticated Netflix
+account. Every fixture is synthetic by design — no copyrighted footage is used
+in any test.
 
 This document is the checklist for what only a human at a real browser can
 confirm. Items marked **[UNVERIFIED]** have never been run against the live site
