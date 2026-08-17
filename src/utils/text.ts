@@ -1,10 +1,18 @@
 /**
  * Text utilities shared by subtitle normalization, screenplay rendering and
  * export filename generation.
+ *
+ * Every character class below is written with explicit escapes rather than
+ * literal characters. Zero-width joiners and non-breaking spaces are invisible
+ * in an editor, and a regex whose behaviour depends on characters nobody can
+ * see is a regex nobody can safely change.
  */
 
 /** Characters that carry no meaning but do break string equality checks. */
-const INVISIBLE = /[​-‍﻿⁠­]/g;
+const INVISIBLE = /[\u200B-\u200D\uFEFF\u2060\u00AD]/g;
+
+/** Whitespace, including the non-breaking space players use for layout. */
+const WHITESPACE = /[\s\u00A0]+/g;
 
 export function stripInvisible(input: string): string {
   return input.replace(INVISIBLE, '');
@@ -12,7 +20,7 @@ export function stripInvisible(input: string): string {
 
 /** Collapses all whitespace runs (including NBSP and newlines) to single spaces. */
 export function collapseWhitespace(input: string): string {
-  return input.replace(/[\s ]+/g, ' ').trim();
+  return input.replace(WHITESPACE, ' ').trim();
 }
 
 /**
@@ -24,10 +32,10 @@ export function comparableText(input: string): string {
   return stripInvisible(input)
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[‘’ʼ]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[.,!?;:'"()\[\]{}\-–—…·]/g, '')
-    .replace(/[\s ]+/g, ' ')
+    .replace(/[\u2018\u2019\u02BC]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[.,!?;:'"()[\]{}\-\u2013\u2014\u2026\u00B7]/g, '')
+    .replace(WHITESPACE, ' ')
     .trim();
 }
 
@@ -74,13 +82,24 @@ export function levenshtein(a: string, b: string): number {
   return prev[b.length]!;
 }
 
-/** Filesystem-safe slug for export filenames. */
+/** Scripts kept verbatim in slugs: kana, CJK ideographs and Hangul syllables. */
+const SLUG_KEEP = /[^a-z0-9\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]+/g;
+
+/**
+ * Filesystem-safe slug for export filenames.
+ *
+ * The NFKD pass strips Latin diacritics, but it also decomposes Hangul
+ * syllables into conjoining jamo, which then fall outside the syllable range
+ * kept above — turning a Korean title into an empty slug. Recomposing with NFC
+ * afterwards restores the syllables while keeping the diacritic stripping.
+ */
 export function slugify(input: string, maxLength = 60): string {
   const slug = input
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFC')
     .toLowerCase()
-    .replace(/[^a-z0-9぀-ヿ一-鿿가-힯]+/g, '-')
+    .replace(SLUG_KEEP, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, maxLength)
     .replace(/-+$/g, '');
@@ -105,5 +124,5 @@ export function splitSentences(input: string): string[] {
 
 /** True if the string is plausibly CJK, used for dual-language layout choices. */
 export function containsCjk(input: string): boolean {
-  return /[぀-ヿ㐀-䶿一-鿿가-힯]/.test(input);
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]/.test(input);
 }

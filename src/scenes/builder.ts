@@ -183,10 +183,20 @@ export class SceneBuilder {
       if (beats.length === 0) continue;
       beats.sort(compareBeats);
 
+      // A scene ends where its evidence ends, not at the playhead. Stretching
+      // the trailing scene to "now" would keep its end permanently ahead of the
+      // stabilization cutoff, so it could never finalize and the finalized
+      // prefix would never grow.
+      const lastEvidenceEnd = sceneEvents.reduce(
+        (max, event) => Math.max(max, event.end ?? event.start),
+        start,
+      );
+      const sceneEnd = Math.max(start + 1, Math.min(end, lastEvidenceEnd));
+
       const scene: ReconstructedScene = {
         id: `scene-${shortHash(`${start}`)}`,
         start,
-        end,
+        end: sceneEnd,
         characters: buildPresence([...presentCharacterIds], beats),
         beats: dedupeBeats(beats),
         provenance: mergeProvenance(...beats.map((b) => b.provenance)),

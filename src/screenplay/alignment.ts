@@ -57,7 +57,7 @@ export function alignCueTracks(
   const b = [...secondary].sort((x, y) => x.start - y.start);
 
   const groups: AlignmentGroup[] = [];
-  const usedB = new Set<number>();
+  const matchedB = new Set<number>();
   let bCursor = 0;
 
   for (const cue of a) {
@@ -68,7 +68,6 @@ export function alignCueTracks(
     for (let i = bCursor; i < b.length; i++) {
       const candidate = b[i]!;
       if (candidate.start > cue.end + opts.maxDriftMs) break;
-      if (usedB.has(i)) continue;
       if (!rangesOverlap(cue, candidate)) continue;
 
       const overlap = overlapDuration(cue, candidate);
@@ -78,7 +77,12 @@ export function alignCueTracks(
       if (ratio >= opts.minOverlapRatio) matches.push({ index: i, cue: candidate, overlap: ratio });
     }
 
-    for (const match of matches) usedB.add(match.index);
+    // A secondary cue is deliberately NOT consumed by the first primary cue
+    // that matches it. In a many-to-one split — two English cues over one
+    // Korean cue — consuming it would leave the second English cue unpaired.
+    // Instead both groups reference the same cue and `mergeAdjacentGroups`
+    // folds them into one unit, so the Korean line is printed exactly once.
+    for (const match of matches) matchedB.add(match.index);
 
     const start = Math.min(cue.start, ...matches.map((m) => m.cue.start));
     const end = Math.max(cue.end, ...matches.map((m) => m.cue.end));
@@ -93,7 +97,7 @@ export function alignCueTracks(
 
   // Secondary cues with no primary counterpart: keep them, marked as unmatched.
   b.forEach((cue, index) => {
-    if (usedB.has(index)) return;
+    if (matchedB.has(index)) return;
     groups.push({ start: cue.start, end: cue.end, primary: [], secondary: [cue], strength: 0 });
   });
 

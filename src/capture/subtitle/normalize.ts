@@ -146,8 +146,15 @@ export class SubtitleAccumulator {
     }
 
     // Idle for too long: the previous cue ended without a clearing event.
+    // Its true end is unknown, so it is estimated as "still displayed until the
+    // idle timeout elapsed". Finalizing at `lastSeen` instead would give a
+    // single-observation cue zero duration and silently drop it.
     if (observation.mediaTime - pending.lastSeen > this.#options.idleTimeoutMs) {
-      const closed = this.#finalize(pending.lastSeen);
+      const estimatedEnd = Math.min(
+        observation.mediaTime,
+        pending.lastSeen + this.#options.idleTimeoutMs,
+      );
+      const closed = this.#finalize(estimatedEnd);
       if (closed) emitted.push(closed);
       this.#pending = this.#open(observation, text, lines);
       return emitted;
@@ -219,8 +226,12 @@ export class SubtitleAccumulator {
     this.#pending = null;
     if (!pending || pending.text.length === 0) return null;
 
-    const end = Math.max(endTime, pending.lastSeen) + this.#options.displayGraceMs;
-    if (end - pending.start < this.#options.minDurationMs) return null;
+    // The minimum-duration test runs on the *observed* span, before the display
+    // grace is added. Testing after would make the grace (250 ms) swallow the
+    // minimum (120 ms) and let every 10 ms render flicker through as a cue.
+    const observedEnd = Math.max(endTime, pending.lastSeen);
+    if (observedEnd - pending.start < this.#options.minDurationMs) return null;
+    const end = observedEnd + this.#options.displayGraceMs;
 
     return {
       text: pending.text,

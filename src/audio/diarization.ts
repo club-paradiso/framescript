@@ -54,9 +54,24 @@ export interface DiarizerOptions {
   minRegionMs?: number;
 }
 
+/**
+ * Thresholds.
+ *
+ * Calibrated against synthetic harmonic signals, where the same voice at
+ * different levels measures ~0.00, two similar voices (110 Hz vs 140 Hz
+ * fundamental) measure ~0.01, and two clearly different voices (110 Hz vs
+ * 300 Hz) measure ~0.14. A merge threshold of 0.18 sat above that last figure
+ * and collapsed obviously-distinct voices into one cluster.
+ *
+ * These are heuristics tuned on synthetic audio and need validation against
+ * real speech — see docs/QA.md. The bias is deliberately toward *over-splitting*
+ * rather than over-merging: a split cluster shows up as two speakers the viewer
+ * can merge in one click, whereas a merged cluster silently attributes two
+ * people's lines to one character.
+ */
 const DIARIZER_DEFAULTS = {
-  mergeThreshold: 0.18,
-  splitThreshold: 0.34,
+  mergeThreshold: 0.1,
+  splitThreshold: 0.25,
   frameMs: 32,
   maxSpeakers: 12,
   minRegionMs: 400,

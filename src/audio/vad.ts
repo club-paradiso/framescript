@@ -64,6 +64,17 @@ export class VoiceActivityDetector {
   #noiseFloorDb = -60;
   #initialized = false;
 
+  /**
+   * Recent zero-crossing rates, smoothed before the voicing decision.
+   *
+   * A single frame's ZCR is noisy: uniform broadband noise averages ~0.50 with
+   * enough per-frame spread that individual frames dip under a 0.45 gate and
+   * open a speech region. Voiced speech has a *sustained* low ZCR, so averaging
+   * a few frames is both more faithful to the physics and far more stable.
+   */
+  #zcrHistory: number[] = [];
+  #zcrWindow = 3;
+
   #inSpeech = false;
   #speechStart: MediaTimeMs = 0;
   #lastVoiceAt: MediaTimeMs = 0;
@@ -129,6 +140,7 @@ export class VoiceActivityDetector {
     this.#pending = new Float32Array(0);
     this.#initialized = false;
     this.#noiseFloorDb = -60;
+    this.#zcrHistory = [];
   }
 
   #processFrame(samples: Float32Array, timestamp: MediaTimeMs): VadFrame {
@@ -140,8 +152,12 @@ export class VoiceActivityDetector {
       this.#initialized = true;
     }
 
+    this.#zcrHistory.push(zcr);
+    if (this.#zcrHistory.length > this.#zcrWindow) this.#zcrHistory.shift();
+    const smoothedZcr = this.#zcrHistory.reduce((s, v) => s + v, 0) / this.#zcrHistory.length;
+
     const excess = db - this.#noiseFloorDb;
-    const voiced = excess >= this.#options.thresholdDb && zcr <= this.#options.maxVoicedZcr;
+    const voiced = excess >= this.#options.thresholdDb && smoothedZcr <= this.#options.maxVoicedZcr;
 
     // Track the floor only on non-speech frames, and let it fall faster than it
     // rises so that a loud scene does not permanently desensitize the detector.

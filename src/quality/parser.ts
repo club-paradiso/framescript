@@ -38,8 +38,11 @@ const AUTO_TOKENS = [/\bauto\b/i, /\bautomatic\b/i, /자동/, /自動/, /авт�
 
 /** Extracts vertical resolution from a player label, or undefined. */
 export function parseResolution(label: string): number | undefined {
-  // "1080p", "2160p60", "720P"
-  const pMatch = /(\d{3,4})\s*p\b/i.exec(label);
+  // "1080p", "2160p60", "720P".
+  // The optional trailing frame rate must be part of the pattern: a bare `\b`
+  // after `p` does not match in "2160p60", because `p` and `6` are both word
+  // characters — which silently made every high-frame-rate tier unrankable.
+  const pMatch = /(\d{3,4})\s*p(?:\d{2,3})?\b/i.exec(label);
   if (pMatch) return Number(pMatch[1]);
 
   // "1920x1080" / "1920×1080"

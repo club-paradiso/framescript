@@ -103,9 +103,11 @@ export class AdaptiveSampler {
 
     const isSceneCut = (event.metrics.sceneCutScore ?? 0) >= 0.6;
 
-    // A scene cut is structural: it defines where scenes begin, so it is worth
-    // a token even when the budget is tight. It still respects the rate ceiling.
-    if (isSceneCut && now - this.#lastAnalysisAt >= minIntervalMs * 0.5) {
+    // A scene cut is structural: it defines where scenes begin, so it jumps the
+    // importance floor and relaxes the rate ceiling. It still has to pay a
+    // token — otherwise a rapid montage would grant unlimited analyses, which
+    // is exactly the unbounded behaviour the budget exists to prevent.
+    if (isSceneCut && this.#tokens >= 1 && now - this.#lastAnalysisAt >= minIntervalMs * 0.5) {
       return this.#grant(now, 'scene-cut', promoted);
     }
 
@@ -139,8 +141,17 @@ export class AdaptiveSampler {
       this.#lastRefillAt = now;
       return;
     }
-    const rate = this.isPromoted(now) ? this.#profile.peakDeepFps : this.#profile.baselineDeepFps;
-    this.#tokens = Math.min(this.#capacity, this.#tokens + (elapsedMs / 1000) * rate);
+    // Refill is ALWAYS at the baseline rate, never the peak rate.
+    //
+    // Promotion raises how fast tokens may be *spent* (the rate ceiling), not
+    // how fast they are *earned*. That is what bounds the long run: a burst of
+    // activity can drain the bucket quickly, but sustained activity — a montage,
+    // an action sequence, a shaky handheld take — settles back to the baseline
+    // instead of pinning deep analysis at the peak rate for minutes.
+    this.#tokens = Math.min(
+      this.#capacity,
+      this.#tokens + (elapsedMs / 1000) * this.#profile.baselineDeepFps,
+    );
     this.#lastRefillAt = now;
   }
 }

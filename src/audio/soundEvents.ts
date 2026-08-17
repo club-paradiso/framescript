@@ -88,8 +88,7 @@ export class SoundEventDetector {
     while (offset + this.#frameSamples <= combined.length) {
       const frame = combined.subarray(offset, offset + this.#frameSamples);
       const timestamp = chunkStart + Math.round((offset / this.#options.sampleRate) * 1000);
-      const event = this.#processFrame(frame, timestamp);
-      if (event) out.push(event);
+      out.push(...this.#processFrame(frame, timestamp));
       offset += this.#frameSamples;
     }
 
@@ -106,7 +105,17 @@ export class SoundEventDetector {
     this.#pending = new Float32Array(0);
   }
 
-  #processFrame(samples: Float32Array, timestamp: MediaTimeMs): SoundOnset | null {
+  /**
+   * Returns every event this frame produced.
+   *
+   * Music transitions and percussive onsets are independent observations that
+   * can occur in the same frame — a score swelling as a door slams. Returning a
+   * single event meant the onset path silently discarded a pending music
+   * transition, so music start/end went unreported whenever anything else was
+   * happening.
+   */
+  #processFrame(samples: Float32Array, timestamp: MediaTimeMs): SoundOnset[] {
+    const events: SoundOnset[] = [];
     const level = amplitudeToDb(rms(samples));
     const spectrum = magnitudeSpectrum(samples);
     const flatness = spectralFlatness(spectrum);
@@ -116,7 +125,7 @@ export class SoundEventDetector {
       this.#backgroundDb = level;
       this.#initialized = true;
       this.#previousSpectrum = spectrum;
-      return null;
+      return events;
     }
 
     const previous = this.#previousSpectrum;
@@ -125,19 +134,21 @@ export class SoundEventDetector {
     const prominenceDb = level - this.#backgroundDb;
 
     const musicEvent = this.#trackMusic(flatness, level, timestamp);
+    if (musicEvent) events.push(musicEvent);
 
     if (prominenceDb < this.#options.minProminenceDb) {
       this.#backgroundDb += (level - this.#backgroundDb) * this.#options.backgroundAdaptation;
-      return musicEvent;
+      return events;
     }
-    if (timestamp - this.#lastOnsetAt < this.#options.minSpacingMs) return musicEvent;
+    if (timestamp - this.#lastOnsetAt < this.#options.minSpacingMs) return events;
 
     this.#lastOnsetAt = timestamp;
     // Flux normalized by frame level gives an attack sharpness independent of volume.
     const attack = Math.min(1, flux / Math.max(1e-6, sum(spectrum) * 0.5));
     const { kind, classified } = classifyOnset({ prominenceDb, attack, centroidHz, flatness });
 
-    return { timestamp, prominenceDb, kind, attack, centroidHz, flatness, classified };
+    events.push({ timestamp, prominenceDb, kind, attack, centroidHz, flatness, classified });
+    return events;
   }
 
   /**

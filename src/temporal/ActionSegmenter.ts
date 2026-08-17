@@ -115,8 +115,13 @@ export class ActionSegmenter {
       return closed;
     }
 
+    // Every event inside an open segment is recorded, including low-importance
+    // ones. Those low-importance observations ARE the hesitation: dropping them
+    // would discard exactly the stillness that "reaches out, hesitates, pulls
+    // back" is made of. Only a sustaining event advances the segment's end, so
+    // a genuine lull still closes the segment via the gap check above.
+    this.#open.events.push(event);
     if (event.importance >= this.#options.sustainThreshold) {
-      this.#open.events.push(event);
       this.#open.end = event.timestamp;
     }
     return closed;

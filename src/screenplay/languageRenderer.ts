@@ -323,7 +323,14 @@ export function documentToText(
     }
     lastKind = line.kind;
   }
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // Collapse blank runs and trim leading/trailing blank LINES only. A plain
+  // `.trim()` would strip the leading indentation off the first line, and
+  // indentation is what makes this a screenplay rather than a transcript.
+  return out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^(?:[ \t]*\n)+/, '')
+    .replace(/(?:\n[ \t]*)+$/, '');
 }
 
 function indent(text: string, columns: number): string {
