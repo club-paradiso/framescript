@@ -1,0 +1,250 @@
+/*
+ * Base styles shared by the popup, side panel and options page.
+ *
+ * Accessibility rules that are non-negotiable and therefore live here rather
+ * than in any one surface: visible focus on every interactive element,
+ * keyboard operability, and font scaling driven by a user setting.
+ */
+
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* Scaled by the appearance setting, so type scales everywhere at once. */
+  font-size: calc(16px * var(--fs-font-scale, 1));
+}
+
+body {
+  margin: 0;
+  background: var(--fs-bg);
+  color: var(--fs-text);
+  font-family: var(--fs-font-ui);
+  font-size: var(--fs-text-base);
+  line-height: var(--fs-leading-normal);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  line-height: var(--fs-leading-tight);
+}
+
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Native controls follow the product accent rather than the browser's blue,
+   so the one accent colour stays the one accent colour. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--fs-accent);
+}
+
+/* Focus is always visible. Removing it would make the whole product
+   keyboard-hostile, and every primary action here has a keyboard path. */
+:focus-visible {
+  outline: 2px solid var(--fs-accent);
+  outline-offset: 2px;
+  border-radius: var(--fs-radius-sm);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* --- Shared primitives ----------------------------------------------------- */
+
+.fs-eyebrow {
+  font-size: var(--fs-text-xs);
+  letter-spacing: var(--fs-tracking-wider);
+  text-transform: uppercase;
+  color: var(--fs-text-muted);
+  font-weight: 600;
+}
+
+.fs-panel {
+  background: var(--fs-surface);
+  border: 1px solid var(--fs-border);
+  border-radius: var(--fs-radius);
+}
+
+.fs-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fs-space-2);
+  padding: var(--fs-space-2) var(--fs-space-4);
+  background: var(--fs-surface-raised);
+  border: 1px solid var(--fs-border-strong);
+  border-radius: var(--fs-radius);
+  color: var(--fs-text);
+  font-size: var(--fs-text-sm);
+  font-weight: 500;
+  transition: background var(--fs-transition), border-color var(--fs-transition);
+}
+
+.fs-button:hover:not(:disabled) {
+  background: var(--fs-border);
+}
+
+.fs-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fs-button--primary {
+  background: var(--fs-accent);
+  border-color: var(--fs-accent);
+  color: var(--fs-text-inverse);
+  font-weight: 600;
+}
+
+.fs-button--primary:hover:not(:disabled) {
+  background: var(--fs-accent-text);
+  border-color: var(--fs-accent-text);
+}
+
+.fs-button--danger {
+  border-color: var(--fs-error);
+  color: var(--fs-error);
+}
+
+.fs-button--block {
+  width: 100%;
+}
+
+/* Source / status dot. */
+.fs-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fs-inactive);
+  flex: none;
+}
+
+.fs-dot--active {
+  background: var(--fs-ok);
+}
+.fs-dot--warn {
+  background: var(--fs-warn);
+}
+.fs-dot--error {
+  background: var(--fs-error);
+}
+.fs-dot--protected {
+  background: var(--fs-info);
+}
+
+/* The pulse marks live capture. It is the one animated thing in the product,
+   because "media is being analyzed right now" must never be ambiguous. */
+.fs-dot--live {
+  background: var(--fs-ok);
+  animation: fs-pulse 2s ease-in-out infinite;
+}
+
+@keyframes fs-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-dot--live {
+    animation: none;
+  }
+}
+
+.fs-row {
+  display: flex;
+  align-items: center;
+  gap: var(--fs-space-2);
+}
+
+.fs-row--between {
+  justify-content: space-between;
+}
+
+.fs-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+.fs-divider {
+  height: 1px;
+  background: var(--fs-border);
+  border: none;
+  margin: 0;
+}
+
+.fs-muted {
+  color: var(--fs-text-muted);
+}
+
+.fs-secondary {
+  color: var(--fs-text-secondary);
+}
+
+.fs-mono {
+  font-family: var(--fs-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fs-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--fs-border-strong) transparent;
+}
+
+.fs-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+
+.fs-scroll::-webkit-scrollbar-thumb {
+  background: var(--fs-border-strong);
+  border-radius: 5px;
+  border: 3px solid var(--fs-bg);
+}
