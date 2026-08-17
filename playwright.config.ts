@@ -15,7 +15,10 @@ import { defineConfig } from '@playwright/test';
  * Live-site verification is a manual pass — see docs/QA.md.
  */
 export default defineConfig({
-  testDir: './e2e',
+  // Both suites launch their own browser context; extension tests need a
+  // persistent context, and the web tests only need a page.
+  testDir: '.',
+  testMatch: ['e2e/**/*.spec.ts', 'e2e-web/**/*.spec.ts'],
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,

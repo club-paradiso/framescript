@@ -2,10 +2,20 @@
 
 **Watch at the best quality. Understand it like a screenplay.**
 
-A desktop Chrome extension for YouTube and Netflix that does two things while you
-watch: keeps playback at the highest quality the platform actually offers, and
-progressively reconstructs a time-synchronized screenplay from everything it can
-legitimately observe.
+Four surfaces over one engine: a Chrome extension that keeps YouTube and Netflix
+playback at the highest quality actually offered and reconstructs a
+time-synchronized screenplay while you watch — plus a web/mobile app, a CLI, and
+an MCP server that run the same reconstruction over files you already have.
+
+| Surface | Runs where | For |
+| --- | --- | --- |
+| **Extension** | Chrome, on YouTube/Netflix | Maximum Quality, and reconstruction while watching |
+| **Studio** | Any browser, installable as a PWA | Your own media files; reading and converting exports |
+| **CLI** | Node 20+ | Scripting and batch conversion |
+| **MCP server** | Codex, Claude Desktop, Claude Code | Letting a model work with screenplays |
+
+Only the extension can see a streaming site's player. The other three work on
+files — see [Integrations](docs/INTEGRATIONS.md).
 
 ---
 
@@ -149,11 +159,22 @@ a deliberate structural guarantee, not just a policy.
 ## Development
 
 ```bash
-npm run dev         # watch build
+npm run dev         # extension watch build
+npm run dev:web     # Studio dev server
 npm run typecheck   # tsc, both project configs
 npm run lint        # eslint, zero warnings tolerated
-npm test            # vitest — 400 tests
+npm test            # vitest — 433 tests
 npm run verify      # typecheck + lint + test + build
+npm run build:all   # extension + Studio + CLI/MCP
+npm run test:e2e    # Playwright: extension and Studio in real Chrome
+```
+
+### Building each surface
+
+```bash
+npm run build        # extension  -> dist/        (load unpacked)
+npm run build:web    # Studio     -> dist-web/    (static, deploy anywhere)
+npm run build:tools  # CLI + MCP  -> dist-tools/
 ```
 
 Most of the interesting logic — quality ranking, temporal heuristics, DSP,
@@ -260,6 +281,7 @@ FrameScript reconstructs only what it observed and never fills gaps.
 | [Platform limitations](docs/PLATFORM_LIMITATIONS.md) | What cannot be done, and why |
 | [Performance](docs/PERFORMANCE.md) | Backpressure, budgets, measured costs |
 | [QA](docs/QA.md) | Manual test checklist |
+| [Integrations](docs/INTEGRATIONS.md) | Studio, CLI, MCP server, Claude Code skill |
 | [Store listing](docs/STORE_LISTING.md) | Chrome Web Store copy |
 
 ## Licence

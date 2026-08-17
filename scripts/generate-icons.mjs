@@ -125,7 +125,7 @@ function crc32(buffer) {
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
-for (const size of [16, 32, 48, 128]) {
+for (const size of [16, 32, 48, 128, 512]) {
   const png = encodePng(renderIcon(size), size);
   writeFileSync(resolve(OUT_DIR, `icon-${size}.png`), png);
   console.log(`wrote icon-${size}.png (${png.length} bytes)`);

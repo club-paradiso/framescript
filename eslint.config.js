@@ -4,7 +4,18 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'playwright-report/**', 'test-results/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'dist-web/**',
+      'dist-tools/**',
+      'web/public/icons/**',
+      'node_modules/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -35,8 +46,23 @@ export default tseslint.config(
     rules: { 'no-console': 'off' },
   },
   {
-    files: ['tests/**/*.{ts,tsx}'],
+    // The CLI and MCP server are Node programs and write to stdio by design.
+    files: ['tools/**/*.ts'],
+    languageOptions: { globals: { ...globals.node } },
+    rules: { 'no-console': 'off' },
+  },
+  {
+    files: ['tests/**/*.{ts,tsx}', 'e2e/**/*.ts', 'e2e-web/**/*.ts'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
     rules: { '@typescript-eslint/no-explicit-any': 'off', 'no-console': 'off' },
+  },
+  {
+    // The service worker has its own global scope: no `window`, but `self`,
+    // `caches` and `clients`.
+    files: ['web/public/sw.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: { ...globals.serviceworker },
+    },
   },
 );

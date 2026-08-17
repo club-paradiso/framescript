@@ -18,7 +18,14 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build:all",
+    "build:tools": "FS_TOOL_ENTRY=cli vite build --config vite.tools.config.ts && FS_TOOL_ENTRY=mcp vite build --config vite.tools.config.ts",
+    "cli": "node dist-tools/cli.js",
+    "mcp": "node dist-tools/mcp.js",
+    "dev:web": "vite --config vite.web.config.ts",
+    "build:web": "node scripts/generate-icons.mjs && node -e \"const{cpSync,mkdirSync}=require('fs');mkdirSync('web/public/icons',{recursive:true});cpSync('src/assets/icons','web/public/icons',{recursive:true})\" && vite build --config vite.web.config.ts",
+    "preview:web": "vite preview --config vite.web.config.ts",
+    "build:all": "npm run build && npm run build:web && npm run build:tools"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -26,6 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@playwright/test": "^1.49.0",
     "@types/chrome": "^0.0.287",
     "@types/node": "^26.2.0",
@@ -45,5 +53,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "bin": {
+    "framescript": "dist-tools/cli.js",
+    "framescript-mcp": "dist-tools/mcp.js"
   }
 }
