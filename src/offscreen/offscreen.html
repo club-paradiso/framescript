@@ -1,0 +1,12 @@
+<meta charset="utf-8" />
+<title>FrameScript media analysis</title>
+<!--
+  Offscreen media document.
+
+  This page has no UI and is never shown. It exists because MV3 service workers
+  cannot hold a MediaStream, use Web Audio, or draw to a canvas — and because
+  running this work in the page's own context would compete with playback.
+-->
+<body>
+  <script type="module" src="./index.ts"></script>
+</body>
