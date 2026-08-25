@@ -1,0 +1,18 @@
+{
+  // Tests and end-to-end specs get the browser types that `src` gets, plus Node's.
+  //
+  // They are kept in a separate project rather than widening `tsconfig.json`
+  // because `src` is browser and extension code: pulling @types/node into it
+  // would supply Node globals it must never rely on, and would silently change
+  // `setTimeout` to return `NodeJS.Timeout` instead of `number`.
+  //
+  // Vitest 2 happened to drag Node's declarations in transitively, which hid
+  // the fact that `tests/` was reading files with no Node types declared at
+  // all. Vitest 4 does not, so the need is now explicit.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["chrome", "vite/client", "node"]
+  },
+  "include": ["tests", "e2e", "e2e-web"],
+  "exclude": ["dist", "node_modules"]
+}

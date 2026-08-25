@@ -161,7 +161,7 @@ a deliberate structural guarantee, not just a policy.
 ```bash
 npm run dev         # extension watch build
 npm run dev:web     # Studio dev server
-npm run typecheck   # tsc, both project configs
+npm run typecheck   # tsc: src, tests/e2e, and build scripts
 npm run lint        # eslint, zero warnings tolerated
 npm test            # vitest — 444 tests
 npm run verify      # typecheck + lint + test + build
