@@ -32,12 +32,82 @@ near-identical and `isRedundant` short-circuits before any scoring. In practice
 a static interview skips the large majority of observations.
 
 **3. Separation of observation from inference.** Only a small, adaptively chosen
-subset earns semantic analysis. Measured in the test suite: 600 observations of
-moderate activity yield 30–120 deep analyses — roughly 1/second against
-10/second observed.
+subset earns semantic analysis. Observation is cheap and constant; inference is
+expensive and rationed by a token bucket.
 
 Per-observation cost is dominated by `getImageData` and the 576-cell loop, both
 of which are microseconds at 480×270.
+
+## Measured
+
+`npm run benchmark` runs the real engine over synthetic material and prints the
+numbers below. It is reproducible, so a regression shows up as a number rather
+than a feeling.
+
+Read one caveat first: this is **Node on a server, not Chrome on a laptop
+competing with a video decoder**. The *ratios* — redundancy skipping, deep
+analyses per minute, audio throughput relative to real time — carry over. The
+absolute per-observation cost is a floor, not a promise. In particular the
+benchmark feeds pixel buffers directly, so it excludes the `getImageData`
+readback that a browser must pay.
+
+Node v22 · analysis frame 480×270 · signature 32×18:
+
+**Video — 10 minutes of moving content at 100 ms (Detailed):**
+
+| | |
+| --- | --- |
+| Observations | 6,000 |
+| Per observation | **0.79 ms** |
+| Share of the 100 ms budget | **0.79 %** |
+| Throughput | 126× real time |
+| Events emitted | 557 |
+| Scene cuts detected | 58 |
+| Deep-analysis requests | 213 (**21.3/minute** of media) |
+
+Under a hundredth of the frame budget, against a synthetic worst case in which
+something moves in *every* frame. Deep analysis lands near 0.36/second observed
+against 10/second — well inside the Detailed profile's 1/second baseline, with
+headroom spent on the scene cuts where it is worth spending.
+
+**Video — 10 minutes of a locked-off shot:**
+
+| | |
+| --- | --- |
+| Per observation | 0.71 ms |
+| Redundant observations skipped | 5,999 of 6,000 (**100.0 %**) |
+| Deep-analysis requests | **0** |
+
+Redundancy skipping is not a partial optimization. A static frame costs one
+signature and nothing else, and never reaches inference at all.
+
+**Audio — 10 minutes of 16 kHz mono:**
+
+| Stage | Time | Relative to real time |
+| --- | --- | --- |
+| VAD | 86 ms | 6,959× |
+| Diarization (59 regions) | 501 ms | — |
+| Sound-event detection | 1,620 ms | 370× |
+| **Full pass** | **2,207 ms** | **272×** |
+
+Sound-event detection dominates because it is the only stage running an FFT over
+every frame of the signal rather than over detected speech.
+
+**Reconstruction — a feature-length subtitle track:**
+
+| | |
+| --- | --- |
+| Parse 1,200 cues | 8 ms |
+| Track duration | 126 minutes |
+| Reconstruct + render | 87 ms |
+| Scenes planted in the fixture | 75 |
+| Scenes detected | **75** |
+
+The fixture is built as a film actually behaves — tight exchanges inside a
+scene, then a hole while the story moves elsewhere — and boundary detection
+recovers every one of its 75 scenes from subtitle timing alone, with no picture,
+no ambience and no chapter markers. That path is what the CLI, Studio and the
+MCP server run on.
 
 ## Analysis resolution vs playback resolution
 
@@ -52,7 +122,11 @@ Completely independent.
 Playback may be 3840×2160 throughout. The analysis copy is drawn from the
 captured stream into an `OffscreenCanvas` at the profile's size.
 
-## Fidelity profiles, measured
+## Fidelity profiles
+
+These are the *configured* rates. What actually happens is reported by the
+diagnostics panel and by the benchmark above; the two differ, and the measured
+number is the one to trust.
 
 | Profile | Observation | Baseline deep | Peak deep | Intended for |
 | --- | --- | --- | --- | --- |

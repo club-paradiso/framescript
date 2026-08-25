@@ -13,3 +13,5 @@ test-results/
 e2e/_*.spec.ts
 web/public/icons/
 e2e-web/_*.spec.ts
+dist-tools/
+dist-web/

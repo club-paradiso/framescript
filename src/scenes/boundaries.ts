@@ -50,7 +50,18 @@ const SIGNAL_WEIGHTS: Record<SceneBoundarySignalKind, number> = {
   'sustained-visual-change': 0.35,
   'on-screen-text': 0.3,
   'music-transition': 0.25,
-  'dialogue-gap': 0.25,
+  /**
+   * Weighted high enough that a genuinely exceptional gap can carry a boundary
+   * alone. That matters because subtitle-only reconstruction (the CLI, the web
+   * app, the MCP server) has no visual cuts, no ambience and no chapters — if
+   * this could not reach the threshold by itself, a two-hour film would come
+   * back as a single scene however long its silences were.
+   *
+   * Safe to weight this highly only because `collectBoundarySignals` scores
+   * gap *strength* relative to the track's own rhythm, so an ordinary pause
+   * scores near zero and cannot trigger anything.
+   */
+  'dialogue-gap': 0.6,
   'visual-cut': 0.2,
 };
 
@@ -139,20 +150,49 @@ export function collectBoundarySignals(
     }
   }
 
-  // Long stretches with no dialogue at all are weak scene-break evidence.
+  // Long stretches with no dialogue are scene-break evidence — but only when
+  // they are long *for this track*. A 20-second gap means nothing in a sparse
+  // documentary and a great deal in a fast two-hander, so strength is scored
+  // against the track's own median gap rather than an absolute constant.
   spoken.sort((a, b) => a.start - b.start);
+  const gaps: number[] = [];
+  for (let i = 1; i < spoken.length; i++) {
+    gaps.push(Math.max(0, spoken[i]!.start - spoken[i - 1]!.end));
+  }
+  const medianGap = median(gaps);
+
   for (let i = 1; i < spoken.length; i++) {
     const gap = spoken[i]!.start - spoken[i - 1]!.end;
-    if (gap >= opts.dialogueGapMs) {
-      signals.push({
-        kind: 'dialogue-gap',
-        timestamp: spoken[i - 1]!.end + Math.floor(gap / 2),
-        strength: Math.min(1, gap / 15_000),
-      });
-    }
+    if (gap < opts.dialogueGapMs) continue;
+    signals.push({
+      kind: 'dialogue-gap',
+      timestamp: spoken[i - 1]!.end + Math.floor(gap / 2),
+      strength: gapStrength(gap, medianGap),
+    });
   }
 
   return signals.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+/**
+ * How exceptional a dialogue gap is, in [0,1].
+ *
+ * Ramps from 2× the track's median gap (nothing unusual) to 8× (a clear break
+ * in the conversation). A track with no rhythm to compare against — a handful
+ * of cues — falls back to an absolute scale so it degrades rather than divides
+ * by zero.
+ */
+export function gapStrength(gapMs: number, medianGapMs: number): number {
+  if (medianGapMs <= 0) return Math.min(1, gapMs / 30_000);
+  const relative = gapMs / medianGapMs;
+  return Math.max(0, Math.min(1, (relative - 2) / 6));
 }
 
 /**

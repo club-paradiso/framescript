@@ -7,6 +7,7 @@ import {
   parseTimestamp,
 } from '@/capture/subtitle/parseSubtitleFile';
 import { buildScreenplay, collectLanguages, summarizeBeats } from '@/core/pipeline';
+import { gapStrength } from '@/scenes/boundaries';
 
 const SRT = `1
 00:00:05,000 --> 00:00:07,500
@@ -250,5 +251,58 @@ Much later
     expect(result.scenes).toEqual([]);
     expect(result.document.lines).toEqual([]);
     expect(result.languages).toEqual([]);
+  });
+});
+
+describe('scene boundaries from subtitle-only evidence', () => {
+  const fmt = (t: number) => {
+    const h = String(Math.floor(t / 3_600_000)).padStart(2, '0');
+    const m = String(Math.floor(t / 60_000) % 60).padStart(2, '0');
+    const s = String(Math.floor(t / 1_000) % 60).padStart(2, '0');
+    return `${h}:${m}:${s},${String(t % 1000).padStart(3, '0')}`;
+  };
+
+  /** Builds an SRT from explicit cue start times. */
+  const srtFrom = (starts: number[], durationMs = 2_000) =>
+    starts
+      .map((start, i) => `${i + 1}\n${fmt(start)} --> ${fmt(start + durationMs)}\nLine ${i}\n`)
+      .join('\n');
+
+  const build = (srt: string) =>
+    buildScreenplay(cuesToEvidence(parseSubtitleFile(srt).cues, { language: 'en' }));
+
+  it('breaks a scene at a gap that is exceptional for the track', () => {
+    // Chatter every ~4 s, then a 90-second hole, then chatter again. With no
+    // picture and no audio, that hole is the only evidence a scene changed —
+    // and it has to be enough, or subtitle-only input yields one giant scene.
+    const starts = [
+      0, 4_000, 8_000, 12_000, 16_000, 20_000,
+      110_000, 114_000, 118_000, 122_000, 126_000,
+    ];
+    const result = build(srtFrom(starts));
+    expect(result.scenes.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not break on the ordinary rhythm of a talkative track', () => {
+    // Uniform 4-second spacing throughout: nothing is exceptional, so nothing
+    // may be claimed as a scene change.
+    const starts = Array.from({ length: 30 }, (_, i) => i * 4_000);
+    expect(build(srtFrom(starts)).scenes).toHaveLength(1);
+  });
+
+  it('does not break on a gap that is ordinary for a sparse track', () => {
+    // Every gap is 30 s; a 30-second gap is this track's normal rhythm.
+    const starts = Array.from({ length: 12 }, (_, i) => i * 32_000);
+    expect(build(srtFrom(starts)).scenes).toHaveLength(1);
+  });
+
+  it('scores gap strength against the track rhythm, not an absolute constant', () => {
+    // The same 30-second gap means different things in different films.
+    expect(gapStrength(30_000, 3_000)).toBe(1);
+    expect(gapStrength(30_000, 30_000)).toBe(0);
+    expect(gapStrength(30_000, 10_000)).toBeCloseTo(1 / 6, 5);
+    // No rhythm to compare against: fall back to an absolute scale.
+    expect(gapStrength(30_000, 0)).toBe(1);
+    expect(gapStrength(6_000, 0)).toBeCloseTo(0.2, 5);
   });
 });
