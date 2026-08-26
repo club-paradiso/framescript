@@ -7,7 +7,8 @@
  * only when enough independent evidence lines up within a short span.
  */
 
-import type { MediaTimeMs } from '../utils/time';
+import { mergeRanges } from '../utils/time';
+import type { MediaTimeMs, TimeRange } from '../utils/time';
 import type { ConfidenceLevel, EvidenceEvent } from '../evidence/types';
 import { fromScore } from '../evidence/confidence';
 
@@ -90,7 +91,7 @@ export function collectBoundarySignals(
 ): SceneBoundarySignal[] {
   const opts = { ...BOUNDARY_DEFAULTS, ...options };
   const signals: SceneBoundarySignal[] = [];
-  const spoken: { start: MediaTimeMs; end: MediaTimeMs }[] = [];
+  const spoken: TimeRange[] = [];
 
   for (const event of events) {
     switch (event.source) {
@@ -150,23 +151,28 @@ export function collectBoundarySignals(
     }
   }
 
+  // Scene-gap rhythm is about periods with no speech, not about the number of
+  // subtitle/ASR tracks describing that speech. Merge overlapping and adjacent
+  // spoken ranges before measuring gaps so aligned translations (or ASR plus a
+  // subtitle track) cannot inject zero-length gaps and collapse the median.
+  const spokenRanges = mergeRanges(spoken);
+
   // Long stretches with no dialogue are scene-break evidence — but only when
   // they are long *for this track*. A 20-second gap means nothing in a sparse
   // documentary and a great deal in a fast two-hander, so strength is scored
   // against the track's own median gap rather than an absolute constant.
-  spoken.sort((a, b) => a.start - b.start);
   const gaps: number[] = [];
-  for (let i = 1; i < spoken.length; i++) {
-    gaps.push(Math.max(0, spoken[i]!.start - spoken[i - 1]!.end));
+  for (let i = 1; i < spokenRanges.length; i++) {
+    gaps.push(Math.max(0, spokenRanges[i]!.start - spokenRanges[i - 1]!.end));
   }
   const medianGap = median(gaps);
 
-  for (let i = 1; i < spoken.length; i++) {
-    const gap = spoken[i]!.start - spoken[i - 1]!.end;
+  for (let i = 1; i < spokenRanges.length; i++) {
+    const gap = spokenRanges[i]!.start - spokenRanges[i - 1]!.end;
     if (gap < opts.dialogueGapMs) continue;
     signals.push({
       kind: 'dialogue-gap',
-      timestamp: spoken[i - 1]!.end + Math.floor(gap / 2),
+      timestamp: spokenRanges[i - 1]!.end + Math.floor(gap / 2),
       strength: gapStrength(gap, medianGap),
     });
   }
