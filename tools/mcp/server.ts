@@ -34,7 +34,7 @@ import {
   exportScreenplay,
   formatTimecode,
   languageFromFilename,
-  migrateScreenplay,
+  parseFrameScriptProject,
   parseSubtitleFile,
   renderScreenplay,
   searchScreenplay,
@@ -91,26 +91,13 @@ async function loadInputs(paths: readonly string[], language?: string): Promise<
 
     if (extname(full).toLowerCase() === '.json') {
       const parsed: unknown = JSON.parse(content);
-      const migrated = migrateScreenplay(parsed);
-      const record = parsed as { scenes?: ReconstructedScene[]; characters?: CharacterEntity[]; metadata?: ExportMetadata };
-
-      if (migrated) {
-        jsonScenes = migrated.record.scenes;
-        jsonCharacters = migrated.record.characters;
-        durationMs = migrated.record.coverage.durationMs;
-        metadata = {
-          ...(migrated.record.title ? { title: migrated.record.title } : {}),
-          ...(migrated.record.seriesTitle ? { seriesTitle: migrated.record.seriesTitle } : {}),
-          ...(migrated.record.season === undefined ? {} : { season: migrated.record.season }),
-          ...(migrated.record.episode === undefined ? {} : { episode: migrated.record.episode }),
-        };
-      } else if (Array.isArray(record.scenes)) {
-        jsonScenes = record.scenes;
-        jsonCharacters = record.characters ?? [];
-        metadata = record.metadata ?? {};
-      } else {
-        throw new Error(`${path} is not a FrameScript export or saved screenplay.`);
-      }
+      const project = parseFrameScriptProject(parsed);
+      if (!project.ok) throw new Error(`${path}: ${project.error}`);
+      jsonScenes = project.project.scenes;
+      jsonCharacters = project.project.characters;
+      durationMs = project.project.coverage.durationMs;
+      metadata = project.project.metadata;
+      warnings.push(...project.warnings.map((warning) => `${basename(path)}: ${warning}`));
       continue;
     }
 
@@ -137,7 +124,8 @@ async function loadInputs(paths: readonly string[], language?: string): Promise<
     const languages = new Set<string>();
     for (const scene of jsonScenes) {
       for (const beat of scene.beats) {
-        if (beat.type === 'dialogue') for (const code of Object.keys(beat.textVariants)) languages.add(code);
+        if (beat.type === 'dialogue')
+          for (const code of Object.keys(beat.textVariants)) languages.add(code);
       }
     }
     return {
@@ -188,12 +176,26 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         files: FILES_SCHEMA,
-        language: { type: 'string', description: 'Script language code, e.g. en, ko, ja. Defaults to the first language with dialogue.' },
-        secondaryLanguage: { type: 'string', description: 'Render a second language alongside each dialogue line.' },
-        format: { type: 'string', enum: EXPORT_FORMATS, description: 'Output format. Default: fountain.' },
+        language: {
+          type: 'string',
+          description:
+            'Script language code, e.g. en, ko, ja. Defaults to the first language with dialogue.',
+        },
+        secondaryLanguage: {
+          type: 'string',
+          description: 'Render a second language alongside each dialogue line.',
+        },
+        format: {
+          type: 'string',
+          enum: EXPORT_FORMATS,
+          description: 'Output format. Default: fountain.',
+        },
         includeTimestamps: { type: 'boolean' },
         includeConfidence: { type: 'boolean' },
-        includeEvidenceRefs: { type: 'boolean', description: 'Annotate each line with the evidence sources that justify it.' },
+        includeEvidenceRefs: {
+          type: 'boolean',
+          description: 'Annotate each line with the evidence sources that justify it.',
+        },
         dialogueOnly: { type: 'boolean' },
       },
       required: ['files'],
@@ -217,9 +219,19 @@ const TOOLS: Tool[] = [
       type: 'object',
       properties: {
         files: FILES_SCHEMA,
-        query: { type: 'string', description: 'Text to find. Matching ignores case and punctuation.' },
-        scope: { type: 'string', enum: ['all', 'dialogue', 'action', 'speaker'], description: 'Default: all.' },
-        language: { type: 'string', description: 'Restrict to one language. Omit to search every language present.' },
+        query: {
+          type: 'string',
+          description: 'Text to find. Matching ignores case and punctuation.',
+        },
+        scope: {
+          type: 'string',
+          enum: ['all', 'dialogue', 'action', 'speaker'],
+          description: 'Default: all.',
+        },
+        language: {
+          type: 'string',
+          description: 'Restrict to one language. Omit to search every language present.',
+        },
         limit: { type: 'number', description: 'Maximum results. Default 50.' },
       },
       required: ['files', 'query'],
@@ -446,7 +458,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Surface the reason as tool output rather than a protocol error, so the
     // model can read it and correct course.
     return {
-      content: [{ type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+      content: [
+        { type: 'text', text: `Error: ${err instanceof Error ? err.message : String(err)}` },
+      ],
       isError: true,
     };
   }

@@ -63,7 +63,11 @@ export type {
   TemporalScannerCallbacks,
 } from '../temporal/TemporalScanner';
 export { AdaptiveSampler } from '../temporal/AdaptiveSampler';
-export { ActionSegmenter, findHesitations, mergeAdjacentSegments } from '../temporal/ActionSegmenter';
+export {
+  ActionSegmenter,
+  findHesitations,
+  mergeAdjacentSegments,
+} from '../temporal/ActionSegmenter';
 export type { ActionSegment } from '../temporal/ActionSegmenter';
 export { KeyframeBuffer, toFrameRef } from '../temporal/KeyframeBuffer';
 export {
@@ -123,7 +127,11 @@ export type { ParsedCue, ParseSubtitleResult } from '../capture/subtitle/parseSu
 // --- Characters ----------------------------------------------------------------
 export { CharacterRegistry, characterCueName } from '../characters/entities';
 export type { CharacterEntity, SceneCharacterPresence } from '../characters/entities';
-export { attributeSpeaker, extractSpeakerLabel, isNonSpeechCaption } from '../characters/attribution';
+export {
+  attributeSpeaker,
+  extractSpeakerLabel,
+  isNonSpeechCaption,
+} from '../characters/attribution';
 
 // --- Scenes --------------------------------------------------------------------
 export { SceneBuilder } from '../scenes/builder';
@@ -166,13 +174,29 @@ export type { ExportMetadata, FountainOptions } from '../screenplay/export/fount
 
 // --- Quality (parsing and ranking only; drivers are platform-specific) ---------
 export { parseQualityOption, parseQualityOptions, parseResolution } from '../quality/parser';
-export { compareQuality, describeQuality, rankQualityOptions, selectQualityOption } from '../quality/ranking';
+export {
+  compareQuality,
+  describeQuality,
+  rankQualityOptions,
+  selectQualityOption,
+} from '../quality/ranking';
 export * from '../quality/types';
 
 // --- Storage schema ------------------------------------------------------------
 export { SCREENPLAY_SCHEMA_VERSION, screenplayId, summarize } from '../storage/schema';
 export type { CoverageRecord, ScreenplaySummary, StoredScreenplay } from '../storage/schema';
 export { migrateScreenplay } from '../storage/migrations';
+export {
+  FRAMESCRIPT_PROJECT_FORMAT,
+  FRAMESCRIPT_PROJECT_VERSION,
+  parseFrameScriptProject,
+} from '../storage/projectFormat';
+export type {
+  FrameScriptProject,
+  ProjectCoverage,
+  ProjectParseResult,
+  ProjectSourceSummary,
+} from '../storage/projectFormat';
 
 // --- Utilities -----------------------------------------------------------------
 export { createIdFactory, hash32, shortHash } from '../utils/id';
@@ -190,7 +214,13 @@ export {
   temporalIou,
 } from '../utils/time';
 export type { MediaTimeMs, TimeRange } from '../utils/time';
-export { collapseWhitespace, comparableText, containsCjk, slugify, textSimilarity } from '../utils/text';
+export {
+  collapseWhitespace,
+  comparableText,
+  containsCjk,
+  slugify,
+  textSimilarity,
+} from '../utils/text';
 export { FrameScriptError, describeError, errorDetail, userMessageFor } from '../utils/errors';
 export type { FrameScriptErrorCode } from '../utils/errors';
 

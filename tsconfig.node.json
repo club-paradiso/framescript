@@ -13,5 +13,14 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["scripts", "vite.config.ts", "vite.content.config.ts", "vitest.config.ts", "playwright.config.ts", "eslint.config.js"]
+  "include": [
+    "scripts",
+    "vite.config.ts",
+    "vite.content.config.ts",
+    "vite.web.config.ts",
+    "vite.tools.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "eslint.config.js"
+  ]
 }

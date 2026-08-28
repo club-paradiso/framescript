@@ -17,6 +17,7 @@ import { createSourceStateMap } from '../evidence/types';
 import { CharacterRegistry } from '../characters/entities';
 import { SceneBuilder } from '../scenes/builder';
 import type { ReconstructedScene } from '../scenes/types';
+import type { FusionConflict } from '../scenes/fusion';
 import type { AnalysisFidelity } from '../temporal/fidelity';
 import type {
   AnalysisPhase,
@@ -101,6 +102,10 @@ export class AnalysisSession {
 
   get scenes(): ReconstructedScene[] {
     return this.#builder.scenes;
+  }
+
+  get conflicts(): readonly FusionConflict[] {
+    return this.#builder.conflicts;
   }
 
   get currentTime(): MediaTimeMs {
@@ -282,7 +287,10 @@ export class AnalysisSession {
    */
   #startRebuildTimer(): void {
     if (this.#rebuildTimer !== null) return;
-    this.#rebuildTimer = setInterval(() => this.#doRebuild(), this.#options.rebuildIntervalMs ?? 1_000);
+    this.#rebuildTimer = setInterval(
+      () => this.#doRebuild(),
+      this.#options.rebuildIntervalMs ?? 1_000,
+    );
   }
 
   #stopRebuildTimer(): void {
