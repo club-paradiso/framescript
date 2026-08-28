@@ -7,8 +7,8 @@
  * validator then enforces the shape, and anything that fails is discarded.
  */
 
-import { v, type Validator } from '../validation';
-import type { VisionWindowAnalysis, VisionWindowRequest } from '../types';
+import { v, type Validator } from '../validation.js';
+import type { VisionWindowAnalysis, VisionWindowRequest } from '../types.js';
 
 const confidence = v.literalUnion(['high', 'medium', 'low', 'unknown'] as const);
 
