@@ -103,19 +103,19 @@ describe('Vercel AI Gateway vision configuration', () => {
       provider: 'vercel-ai-gateway',
       endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
       apiKey: 'request-context-token',
-      model: 'openai/gpt-5.6-luna',
+      model: 'google/gemini-3.5-flash-lite',
     });
   });
 
   it('supports overriding only the Gateway vision model', () => {
     delete process.env.FRAMESCRIPT_VISION_API_KEY;
     process.env.AI_GATEWAY_API_KEY = 'gateway-key';
-    process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL = 'google/gemini-3.7-flash';
+    process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL = 'openai/gpt-5.6-luna';
 
     expect(readVisionConfig()).toMatchObject({
       provider: 'vercel-ai-gateway',
       apiKey: 'gateway-key',
-      model: 'google/gemini-3.7-flash',
+      model: 'openai/gpt-5.6-luna',
     });
   });
 
@@ -136,11 +136,12 @@ describe('Vercel AI Gateway vision configuration', () => {
 });
 
 describe('Vercel AI Gateway transcription transport', () => {
-  it('sends base64 WAV audio with model and OIDC authentication', async () => {
+  it('matches the official v4 Gateway envelope for base64 WAV audio', async () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('authorization')).toBe('Bearer oidc-test-token');
       expect(headers.get('ai-model-id')).toBe('openai/gpt-4o-transcribe');
+      expect(headers.get('ai-transcription-model-specification-version')).toBe('4');
       const body = JSON.parse(String(init?.body)) as { audio: string; mediaType: string };
       expect(body.mediaType).toBe('audio/wav');
       expect(body.audio).toBe('AQIDBA==');
@@ -177,7 +178,39 @@ describe('Vercel AI Gateway transcription transport', () => {
     });
   });
 
-  it('maps Gateway rate limiting onto the existing retryable ASR error', async () => {
+  it('maps a deterministic Gateway 400 to ASR_BAD_REQUEST without retry semantics', async () => {
+    await expect(
+      transcribeViaGateway({
+        wav: new Uint8Array([1, 2, 3, 4]),
+        endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
+        token: 'oidc-test-token',
+        model: 'openai/gpt-4o-transcribe',
+        fetchImpl: (async () =>
+          new Response(JSON.stringify({ type: 'invalid_request_error', statusCode: 400 }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          })) as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ code: 'ASR_BAD_REQUEST', recoverable: false });
+  });
+
+  it('distinguishes a Gateway allowlist 403 from missing configuration', async () => {
+    await expect(
+      transcribeViaGateway({
+        wav: new Uint8Array([1, 2, 3, 4]),
+        endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
+        token: 'oidc-test-token',
+        model: 'openai/gpt-4o-transcribe',
+        fetchImpl: (async () =>
+          new Response(JSON.stringify({ type: 'no_providers_available', statusCode: 403 }), {
+            status: 403,
+            headers: { 'content-type': 'application/json' },
+          })) as typeof fetch,
+      }),
+    ).rejects.toMatchObject({ code: 'ASR_MODEL_UNAVAILABLE', recoverable: false });
+  });
+
+  it('maps Gateway rate limiting onto the retryable ASR error', async () => {
     await expect(
       transcribeViaGateway({
         wav: new Uint8Array([1, 2, 3, 4]),
