@@ -1,0 +1,49 @@
+name: Production AI smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'api/**'
+      - 'src/ai/**'
+      - 'src/utils/base64.ts'
+      - 'scripts/make-fixture-media.mjs'
+      - 'scripts/production-ai-smoke.mjs'
+      - '.github/workflows/production-ai-smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-ai-smoke
+  cancel-in-progress: true
+
+jobs:
+  live-inference:
+    name: Live production inference
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate synthetic media fixture
+        run: node scripts/make-fixture-media.mjs
+
+      - name: Let the production alias settle
+        if: github.event_name == 'push'
+        run: sleep 20
+
+      - name: Exercise production ASR and vision
+        env:
+          FRAMESCRIPT_SMOKE_ORIGIN: https://framescript-eta.vercel.app
+          FRAMESCRIPT_SMOKE_ASR_MODEL: openai/gpt-4o-transcribe
+          FRAMESCRIPT_SMOKE_VISION_MODEL: google/gemini-3.5-flash-lite
+        run: node scripts/production-ai-smoke.mjs

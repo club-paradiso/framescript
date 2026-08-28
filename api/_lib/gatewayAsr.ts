@@ -3,6 +3,7 @@ import { normalizeAsrLanguage } from '../../src/ai/providers/openaiCompatible.js
 import { providerResponseError } from '../../src/ai/retry.js';
 import { FrameScriptError } from '../../src/utils/errors.js';
 import { toBase64 } from '../../src/utils/base64.js';
+import type { GatewayAuthMethod } from './config.js';
 
 interface GatewayTranscriptionResponse {
   text?: unknown;
@@ -24,6 +25,7 @@ export interface GatewayTranscribeRequest {
   wav: Uint8Array;
   endpoint: string;
   token: string;
+  authMethod: GatewayAuthMethod;
   model: string;
   languageHint?: string;
   signal?: AbortSignal;
@@ -34,10 +36,11 @@ export interface GatewayTranscribeRequest {
  * Sends one already-bounded WAV speech window through Vercel AI Gateway.
  *
  * This mirrors the current `@ai-sdk/gateway` v4 transcription transport:
- * model id + transcription specification version headers, and a JSON body with
- * base64 audio plus its media type. Keeping the wire contract aligned with the
- * official provider matters because the v4 endpoint rejects an incomplete
- * model envelope before it ever reaches the upstream ASR provider.
+ * Gateway protocol/auth headers + model id + transcription specification
+ * version, and a JSON body with base64 audio plus its media type. The protocol
+ * and auth-method headers are part of the official provider envelope; omitting
+ * them causes the Gateway to reject an otherwise valid transcription request as
+ * `invalid_request_error` before the upstream model receives the audio.
  */
 export async function transcribeViaGateway(
   request: GatewayTranscribeRequest,
@@ -48,6 +51,8 @@ export async function transcribeViaGateway(
     headers: {
       authorization: `Bearer ${request.token}`,
       'content-type': 'application/json',
+      'ai-gateway-protocol-version': '0.0.1',
+      'ai-gateway-auth-method': request.authMethod,
       'ai-transcription-model-specification-version': '4',
       'ai-model-id': request.model,
     },
@@ -62,7 +67,7 @@ export async function transcribeViaGateway(
     throw await providerResponseError(
       response,
       'asr',
-      `gateway=vercel model=${request.model} spec=4 mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
+      `gateway=vercel model=${request.model} protocol=0.0.1 authMethod=${request.authMethod} spec=4 mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
     );
   }
 

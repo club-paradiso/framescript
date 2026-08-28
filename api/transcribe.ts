@@ -80,6 +80,7 @@ export async function POST(request: Request): Promise<Response> {
             wav,
             endpoint: asr.endpoint,
             token: asr.apiKey,
+            authMethod: asr.gatewayAuthMethod ?? 'oidc',
             model: asr.model,
             ...(languageHint ? { languageHint } : {}),
             ...(request.signal ? { signal: request.signal } : {}),

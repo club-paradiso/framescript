@@ -12,12 +12,14 @@
 
 export type AsrProviderId = 'openai-compatible' | 'vercel-ai-gateway';
 export type VisionProviderId = 'anthropic' | 'openai-compatible' | 'vercel-ai-gateway';
+export type GatewayAuthMethod = 'api-key' | 'oidc';
 
 export interface AsrConfig {
   provider: AsrProviderId;
   endpoint: string;
   apiKey: string;
   model: string;
+  gatewayAuthMethod?: GatewayAuthMethod;
 }
 
 export interface VisionConfig {
@@ -25,6 +27,7 @@ export interface VisionConfig {
   endpoint: string;
   apiKey: string;
   model: string;
+  gatewayAuthMethod?: GatewayAuthMethod;
 }
 
 /** What the browser is allowed to know. Never contains a key or a full URL. */
@@ -68,6 +71,11 @@ type VercelContextGlobal = typeof globalThis & {
   [VERCEL_REQUEST_CONTEXT]?: { get?: () => VercelRequestContext };
 };
 
+interface GatewayCredential {
+  token: string;
+  authMethod: GatewayAuthMethod;
+}
+
 function env(name: string): string {
   const value = process.env[name];
   return typeof value === 'string' ? value.trim() : '';
@@ -84,8 +92,22 @@ function vercelRuntimeOidcToken(): string {
   return typeof token === 'string' ? token.trim() : '';
 }
 
-function gatewayCredential(): string {
-  return env('AI_GATEWAY_API_KEY') || vercelRuntimeOidcToken() || env('VERCEL_OIDC_TOKEN');
+/**
+ * AI Gateway's v4 protocol requires callers to state how the bearer token was
+ * obtained. Do not infer this from token contents: API-key formats can change,
+ * while the configuration source already tells us the answer exactly.
+ */
+function gatewayCredential(): GatewayCredential | null {
+  const gatewayApiKey = env('AI_GATEWAY_API_KEY');
+  if (gatewayApiKey) return { token: gatewayApiKey, authMethod: 'api-key' };
+
+  const runtimeOidc = vercelRuntimeOidcToken();
+  if (runtimeOidc) return { token: runtimeOidc, authMethod: 'oidc' };
+
+  const environmentOidc = env('VERCEL_OIDC_TOKEN');
+  if (environmentOidc) return { token: environmentOidc, authMethod: 'oidc' };
+
+  return null;
 }
 
 export function readAsrConfig(): AsrConfig | { error: string } {
@@ -109,12 +131,13 @@ export function readAsrConfig(): AsrConfig | { error: string } {
   // Explicit Gateway keys remain useful outside Vercel. On Vercel, the
   // per-request context is authoritative because its OIDC token is refreshed by
   // the platform instead of being a process-lifetime snapshot.
-  const gatewayToken = gatewayCredential();
-  if (gatewayToken) {
+  const gateway = gatewayCredential();
+  if (gateway) {
     return {
       provider: 'vercel-ai-gateway',
       endpoint: DEFAULT_GATEWAY_ASR_ENDPOINT,
-      apiKey: gatewayToken,
+      apiKey: gateway.token,
+      gatewayAuthMethod: gateway.authMethod,
       model: env('FRAMESCRIPT_GATEWAY_ASR_MODEL') || DEFAULT_GATEWAY_ASR_MODEL,
     };
   }
@@ -146,12 +169,13 @@ export function readVisionConfig(): VisionConfig | { error: string } {
   // Reuse the same short-lived deployment credential as transcription. The
   // Gateway's OpenAI-compatible chat endpoint accepts image data URLs, which is
   // exactly the wire format FrameScript's existing vision adapter already uses.
-  const gatewayToken = gatewayCredential();
-  if (gatewayToken) {
+  const gateway = gatewayCredential();
+  if (gateway) {
     return {
       provider: 'vercel-ai-gateway',
       endpoint: DEFAULT_GATEWAY_VISION_ENDPOINT,
-      apiKey: gatewayToken,
+      apiKey: gateway.token,
+      gatewayAuthMethod: gateway.authMethod,
       model: env('FRAMESCRIPT_GATEWAY_VISION_MODEL') || DEFAULT_GATEWAY_VISION_MODEL,
     };
   }
