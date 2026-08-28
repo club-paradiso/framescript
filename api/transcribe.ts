@@ -33,8 +33,7 @@ export const config = { maxDuration: 60 };
 /** BCP-47-ish, and short. Rejects anything that is not a plain language tag. */
 const LANGUAGE = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
+export async function POST(request: Request): Promise<Response> {
   if (declaredTooLarge(request))
     return tooLarge('Audio window is larger than this endpoint accepts.');
 
@@ -107,6 +106,12 @@ export default async function handler(request: Request): Promise<Response> {
     }
     return errorResponse(error);
   }
+}
+
+/** Kept for direct unit/E2E invocation outside Vercel. */
+export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST');
+  return POST(request);
 }
 
 function numberField(form: FormData, name: string): number | null {
