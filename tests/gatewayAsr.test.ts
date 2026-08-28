@@ -48,6 +48,7 @@ describe('Vercel AI Gateway ASR configuration', () => {
     expect(readAsrConfig()).toMatchObject({
       provider: 'vercel-ai-gateway',
       apiKey: 'oidc-test-token',
+      gatewayAuthMethod: 'oidc',
       model: 'openai/gpt-4o-transcribe',
     });
   });
@@ -68,7 +69,20 @@ describe('Vercel AI Gateway ASR configuration', () => {
     expect(readAsrConfig()).toMatchObject({
       provider: 'vercel-ai-gateway',
       apiKey: 'request-context-token',
+      gatewayAuthMethod: 'oidc',
       model: 'openai/gpt-4o-transcribe',
+    });
+  });
+
+  it('marks an explicit AI Gateway API key as api-key auth', () => {
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+
+    expect(readAsrConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      apiKey: 'gateway-key',
+      gatewayAuthMethod: 'api-key',
     });
   });
 
@@ -103,6 +117,7 @@ describe('Vercel AI Gateway vision configuration', () => {
       provider: 'vercel-ai-gateway',
       endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
       apiKey: 'request-context-token',
+      gatewayAuthMethod: 'oidc',
       model: 'google/gemini-3.5-flash-lite',
     });
   });
@@ -115,6 +130,7 @@ describe('Vercel AI Gateway vision configuration', () => {
     expect(readVisionConfig()).toMatchObject({
       provider: 'vercel-ai-gateway',
       apiKey: 'gateway-key',
+      gatewayAuthMethod: 'api-key',
       model: 'openai/gpt-5.6-luna',
     });
   });
@@ -140,6 +156,8 @@ describe('Vercel AI Gateway transcription transport', () => {
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('authorization')).toBe('Bearer oidc-test-token');
+      expect(headers.get('ai-gateway-protocol-version')).toBe('0.0.1');
+      expect(headers.get('ai-gateway-auth-method')).toBe('oidc');
       expect(headers.get('ai-model-id')).toBe('openai/gpt-4o-transcribe');
       expect(headers.get('ai-transcription-model-specification-version')).toBe('4');
       const body = JSON.parse(String(init?.body)) as { audio: string; mediaType: string };
@@ -166,6 +184,7 @@ describe('Vercel AI Gateway transcription transport', () => {
       wav: new Uint8Array([1, 2, 3, 4]),
       endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
       token: 'oidc-test-token',
+      authMethod: 'oidc',
       model: 'openai/gpt-4o-transcribe',
       languageHint: 'ko',
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -184,6 +203,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         wav: new Uint8Array([1, 2, 3, 4]),
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
+        authMethod: 'oidc',
         model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () =>
           new Response(JSON.stringify({ type: 'invalid_request_error', statusCode: 400 }), {
@@ -200,6 +220,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         wav: new Uint8Array([1, 2, 3, 4]),
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
+        authMethod: 'oidc',
         model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () =>
           new Response(JSON.stringify({ type: 'no_providers_available', statusCode: 403 }), {
@@ -216,6 +237,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         wav: new Uint8Array([1, 2, 3, 4]),
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
+        authMethod: 'oidc',
         model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () => new Response('rate limited', { status: 429 })) as typeof fetch,
       }),
