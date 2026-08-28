@@ -23,7 +23,7 @@ import {
   validateVisionAnalysis,
 } from '../schemas/visionWindow.js';
 import { FrameScriptError } from '../../utils/errors.js';
-import { providerError } from '../retry.js';
+import { providerResponseError } from '../retry.js';
 import { toBase64 } from '../../utils/base64.js';
 
 export interface OpenAiCompatibleVisionConfig {
@@ -71,7 +71,9 @@ export class OpenAiCompatibleVisionProvider implements VisionAnalysisProvider {
     if (frames.length === 0) return null;
 
     const content: Record<string, unknown>[] = [];
+    let frameBytes = 0;
     for (const frame of frames) {
+      frameBytes += frame.data.byteLength;
       content.push({ type: 'text', text: `Frame at +${frame.timestamp - request.start}ms:` });
       content.push({
         type: 'image_url',
@@ -99,31 +101,48 @@ export class OpenAiCompatibleVisionProvider implements VisionAnalysisProvider {
     });
 
     if (!response.ok) {
-      // The body can echo the request, and the request contains frames.
-      throw providerError(response.status, 'vision', `vision endpoint returned ${response.status}`);
+      throw await providerResponseError(
+        response,
+        'vision',
+        `model=${this.#config.model} frames=${frames.length} frameBytes=${frameBytes}`,
+      );
     }
 
-    const json = (await response.json()) as ChatCompletionResponse;
+    let json: ChatCompletionResponse;
+    try {
+      json = (await response.json()) as ChatCompletionResponse;
+    } catch {
+      throw new FrameScriptError({
+        code: 'VISION_RESPONSE_INVALID',
+        detail: `model=${this.#config.model} response=non-json`,
+      });
+    }
     if (json.error) {
       throw new FrameScriptError({
         code: 'VISION_PROVIDER_FAILED',
-        detail: json.error.type ?? 'api error',
+        detail: `model=${this.#config.model} providerReportedError=${json.error.type ?? 'unknown'}`,
       });
     }
     const text = json.choices?.[0]?.message?.content;
     if (!text) {
-      throw new FrameScriptError({ code: 'AI_RESPONSE_INVALID', detail: 'empty response' });
+      throw new FrameScriptError({
+        code: 'VISION_RESPONSE_INVALID',
+        detail: `model=${this.#config.model} response=empty`,
+      });
     }
 
     const parsed = extractJson(text);
     if (parsed === undefined) {
-      throw new FrameScriptError({ code: 'AI_RESPONSE_INVALID', detail: 'response was not JSON' });
+      throw new FrameScriptError({
+        code: 'VISION_RESPONSE_INVALID',
+        detail: `model=${this.#config.model} response=not-json-content`,
+      });
     }
     const validated = validateVisionAnalysis(parsed);
     if (!validated) {
       throw new FrameScriptError({
-        code: 'AI_RESPONSE_INVALID',
-        detail: 'schema validation failed',
+        code: 'VISION_RESPONSE_INVALID',
+        detail: `model=${this.#config.model} response=schema-validation-failed`,
       });
     }
     return validated;
