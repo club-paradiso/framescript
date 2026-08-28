@@ -5,8 +5,8 @@
  * available. Studio uses it to label transcription and scene understanding as
  * Ready or Not configured instead of implying every mode does the same thing.
  *
- * Booleans, provider ids, model names and numeric limits only. No endpoint, no
- * key, no environment values.
+ * Provider ids, model names, numeric limits, and deployment identity only. No
+ * endpoint, credential, or arbitrary environment value is exposed.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -14,8 +14,18 @@ import { capabilityReport } from './_lib/config.js';
 import { json, methodNotAllowed } from './_lib/http.js';
 import { writeWebResponse } from './_lib/nodeAdapter.js';
 
+function reportWithDeploymentIdentity() {
+  return {
+    ...capabilityReport(),
+    deployment: {
+      commitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+      environment: process.env.VERCEL_ENV ?? null,
+    },
+  };
+}
+
 export function GET(_request: Request): Response {
-  return json(capabilityReport());
+  return json(reportWithDeploymentIdentity());
 }
 
 export const HEAD = GET;
@@ -38,6 +48,8 @@ export default function handler(
 
   const method = (request.method ?? 'GET').toUpperCase();
   const result =
-    method === 'GET' || method === 'HEAD' ? json(capabilityReport()) : methodNotAllowed('GET');
+    method === 'GET' || method === 'HEAD'
+      ? json(reportWithDeploymentIdentity())
+      : methodNotAllowed('GET');
   return writeWebResponse(response, result);
 }
