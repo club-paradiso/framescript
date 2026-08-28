@@ -16,7 +16,7 @@
  * Nothing is stored. The window exists for the duration of one request.
  */
 
-import { isError, readAsrConfig, LIMITS } from './_lib/config';
+import { isError, readAsrConfig, LIMITS } from './_lib/config.js';
 import {
   badRequest,
   declaredTooLarge,
@@ -24,9 +24,9 @@ import {
   json,
   methodNotAllowed,
   tooLarge,
-} from './_lib/http';
-import { transcribeWav } from '../src/ai/providers/openaiCompatible';
-import { FrameScriptError } from '../src/utils/errors';
+} from './_lib/http.js';
+import { transcribeWav } from '../src/ai/providers/openaiCompatible.js';
+import { FrameScriptError } from '../src/utils/errors.js';
 
 export const config = { maxDuration: 60 };
 
