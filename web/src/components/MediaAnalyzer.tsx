@@ -35,6 +35,14 @@ const APP_VERSION = '0.1.0';
 const SCENE_BUDGETS = { off: 0, key: 6, extended: 12 } as const;
 type SceneDepth = keyof typeof SCENE_BUDGETS;
 
+const SPOKEN_LANGUAGES = [
+  { value: 'auto', label: 'Auto detect' },
+  { value: 'en', label: 'English' },
+  { value: 'ko', label: '한국어 (Korean)' },
+  { value: 'es', label: 'Español (Spanish)' },
+] as const;
+type SpokenLanguage = (typeof SPOKEN_LANGUAGES)[number]['value'];
+
 export function MediaAnalyzer({
   file,
   onComplete,
@@ -47,6 +55,7 @@ export function MediaAnalyzer({
   const [analyzeAudio, setAnalyzeAudio] = useState(true);
   const [analyzeVideo, setAnalyzeVideo] = useState(true);
   const [transcribe, setTranscribe] = useState(true);
+  const [spokenLanguage, setSpokenLanguage] = useState<SpokenLanguage>('auto');
   const [sceneDepth, setSceneDepth] = useState<SceneDepth>('key');
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [outcome, setOutcome] = useState<AnalysisOutcome | null>(null);
@@ -103,6 +112,7 @@ export function MediaAnalyzer({
         analyzeAudio,
         analyzeVideo: analyzeVideo && isVideo,
         transcribe: transcribe && canTranscribe,
+        ...(spokenLanguage === 'auto' ? {} : { languageHint: spokenLanguage }),
         sceneUnderstanding: canSeeScenes && sceneWindows > 0,
         maxSceneWindows: sceneWindows,
         capabilities: resolved,
@@ -127,6 +137,7 @@ export function MediaAnalyzer({
     resolved,
     sceneWindows,
     scanRate,
+    spokenLanguage,
     transcribe,
   ]);
 
@@ -275,6 +286,30 @@ export function MediaAnalyzer({
             </em>
           </span>
         </label>
+      </div>
+
+      <div className="field">
+        <label className="field__label" htmlFor="spoken-language">
+          Spoken language
+        </label>
+        <select
+          id="spoken-language"
+          className="select"
+          value={spokenLanguage}
+          disabled={running || !canTranscribe || !transcribe}
+          onChange={(e) => setSpokenLanguage(e.target.value as SpokenLanguage)}
+        >
+          {SPOKEN_LANGUAGES.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <p className="muted small">
+          Auto detect is safest for mixed or unknown audio. Choosing English, 한국어 or Español
+          sends a language hint to the transcription model, improving recognition accuracy and
+          avoiding ambiguous language labels without translating the dialogue.
+        </p>
       </div>
 
       {isVideo && (
