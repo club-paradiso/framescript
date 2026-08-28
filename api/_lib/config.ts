@@ -10,7 +10,7 @@
  * "Transcription — not configured" and keeps doing local analysis.
  */
 
-export type AsrProviderId = 'openai-compatible';
+export type AsrProviderId = 'openai-compatible' | 'vercel-ai-gateway';
 export type VisionProviderId = 'anthropic' | 'openai-compatible';
 
 export interface AsrConfig {
@@ -49,6 +49,8 @@ export const LIMITS = {
 } as const;
 
 const DEFAULT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
+const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcription-model';
+const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
 function env(name: string): string {
@@ -57,21 +59,40 @@ function env(name: string): string {
 }
 
 export function readAsrConfig(): AsrConfig | { error: string } {
-  const apiKey = env('FRAMESCRIPT_ASR_API_KEY');
-  if (!apiKey) return { error: 'FRAMESCRIPT_ASR_API_KEY is not set.' };
+  const explicitApiKey = env('FRAMESCRIPT_ASR_API_KEY');
+  if (explicitApiKey) {
+    const provider = (env('FRAMESCRIPT_ASR_PROVIDER') || 'openai-compatible') as AsrProviderId;
+    if (provider !== 'openai-compatible') {
+      return { error: `Unsupported FRAMESCRIPT_ASR_PROVIDER "${provider}".` };
+    }
+    const model = env('FRAMESCRIPT_ASR_MODEL');
+    if (!model) return { error: 'FRAMESCRIPT_ASR_MODEL is not set.' };
 
-  const provider = (env('FRAMESCRIPT_ASR_PROVIDER') || 'openai-compatible') as AsrProviderId;
-  if (provider !== 'openai-compatible') {
-    return { error: `Unsupported FRAMESCRIPT_ASR_PROVIDER "${provider}".` };
+    return {
+      provider,
+      endpoint: env('FRAMESCRIPT_ASR_ENDPOINT') || DEFAULT_ASR_ENDPOINT,
+      apiKey: explicitApiKey,
+      model,
+    };
   }
-  const model = env('FRAMESCRIPT_ASR_MODEL');
-  if (!model) return { error: 'FRAMESCRIPT_ASR_MODEL is not set.' };
+
+  // Vercel injects a short-lived OIDC token into deployed functions. AI Gateway
+  // accepts that token directly, so production can transcribe without storing a
+  // long-lived OpenAI credential in the project. A manually supplied Gateway
+  // API key remains useful for local/non-Vercel deployments.
+  const gatewayToken = env('AI_GATEWAY_API_KEY') || env('VERCEL_OIDC_TOKEN');
+  if (gatewayToken) {
+    return {
+      provider: 'vercel-ai-gateway',
+      endpoint: DEFAULT_GATEWAY_ASR_ENDPOINT,
+      apiKey: gatewayToken,
+      model: env('FRAMESCRIPT_GATEWAY_ASR_MODEL') || DEFAULT_GATEWAY_ASR_MODEL,
+    };
+  }
 
   return {
-    provider,
-    endpoint: env('FRAMESCRIPT_ASR_ENDPOINT') || DEFAULT_ASR_ENDPOINT,
-    apiKey,
-    model,
+    error:
+      'No transcription credential is available. Set FRAMESCRIPT_ASR_API_KEY, or deploy on Vercel with AI Gateway OIDC enabled.',
   };
 }
 
