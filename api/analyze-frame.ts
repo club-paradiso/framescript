@@ -51,8 +51,7 @@ interface RequestPayload {
   metrics?: unknown;
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
+export async function POST(request: Request): Promise<Response> {
   if (declaredTooLarge(request))
     return tooLarge('Frame payload is larger than this endpoint accepts.');
 
@@ -110,6 +109,12 @@ export default async function handler(request: Request): Promise<Response> {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+/** Kept for direct unit/E2E invocation outside Vercel. */
+export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'POST') return methodNotAllowed('POST');
+  return POST(request);
 }
 
 function finiteNumber(value: unknown): number | null {
