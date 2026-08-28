@@ -52,10 +52,30 @@ const DEFAULT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcription-model';
 const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
+const VERCEL_REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
+
+type VercelRequestContext = {
+  headers?: Record<string, string>;
+};
+
+type VercelContextGlobal = typeof globalThis & {
+  [VERCEL_REQUEST_CONTEXT]?: { get?: () => VercelRequestContext };
+};
 
 function env(name: string): string {
   const value = process.env[name];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Vercel supplies the deployment OIDC token on the per-request runtime context.
+ * Reading it here on every request avoids caching a short-lived credential. The
+ * environment variable remains a fallback for local tooling and older runtimes.
+ */
+function vercelRuntimeOidcToken(): string {
+  const context = (globalThis as VercelContextGlobal)[VERCEL_REQUEST_CONTEXT]?.get?.();
+  const token = context?.headers?.['x-vercel-oidc-token'];
+  return typeof token === 'string' ? token.trim() : '';
 }
 
 export function readAsrConfig(): AsrConfig | { error: string } {
@@ -76,11 +96,11 @@ export function readAsrConfig(): AsrConfig | { error: string } {
     };
   }
 
-  // Vercel injects a short-lived OIDC token into deployed functions. AI Gateway
-  // accepts that token directly, so production can transcribe without storing a
-  // long-lived OpenAI credential in the project. A manually supplied Gateway
-  // API key remains useful for local/non-Vercel deployments.
-  const gatewayToken = env('AI_GATEWAY_API_KEY') || env('VERCEL_OIDC_TOKEN');
+  // Explicit Gateway keys remain useful outside Vercel. On Vercel, the
+  // per-request context is authoritative because its OIDC token is refreshed by
+  // the platform instead of being a process-lifetime snapshot.
+  const gatewayToken =
+    env('AI_GATEWAY_API_KEY') || vercelRuntimeOidcToken() || env('VERCEL_OIDC_TOKEN');
   if (gatewayToken) {
     return {
       provider: 'vercel-ai-gateway',
