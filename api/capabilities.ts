@@ -12,7 +12,14 @@
 import { capabilityReport } from './_lib/config.js';
 import { json, methodNotAllowed } from './_lib/http.js';
 
+export function GET(_request: Request): Response {
+  return json(capabilityReport());
+}
+
+export const HEAD = GET;
+
+/** Kept for direct unit/E2E invocation outside Vercel. */
 export default function handler(request: Request): Response {
   if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET');
-  return json(capabilityReport());
+  return GET(request);
 }
