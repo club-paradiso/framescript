@@ -12,9 +12,9 @@
  *   3. **Every request is bounded** before anything is read into memory.
  */
 
-import { LIMITS } from './config';
-import { describeError, errorDetail, FrameScriptError } from '../../src/utils/errors';
-import { isAbort } from '../../src/ai/retry';
+import { LIMITS } from './config.js';
+import { describeError, errorDetail, FrameScriptError } from '../../src/utils/errors.js';
+import { isAbort } from '../../src/ai/retry.js';
 
 export function json(
   body: unknown,
