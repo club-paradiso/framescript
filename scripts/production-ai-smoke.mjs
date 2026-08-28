@@ -19,6 +19,8 @@ const origin = (process.env.FRAMESCRIPT_SMOKE_ORIGIN || 'https://framescript-eta
 const expectedAsrModel = process.env.FRAMESCRIPT_SMOKE_ASR_MODEL || 'openai/gpt-4o-transcribe';
 const expectedVisionModel =
   process.env.FRAMESCRIPT_SMOKE_VISION_MODEL || 'google/gemini-3.5-flash-lite';
+const expectedGitSha = process.env.FRAMESCRIPT_SMOKE_GIT_SHA || '';
+const expectedEnvironment = process.env.FRAMESCRIPT_SMOKE_ENVIRONMENT || '';
 
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -62,9 +64,22 @@ async function checkCapabilities() {
   if (body.vision.model !== expectedVisionModel) {
     fail(`unexpected vision model ${String(body.vision.model)}`);
   }
+  if (expectedGitSha && body?.deployment?.commitSha !== expectedGitSha) {
+    fail(
+      `deployment SHA mismatch expected=${expectedGitSha} actual=${String(body?.deployment?.commitSha)}`,
+    );
+  }
+  if (expectedEnvironment && body?.deployment?.environment !== expectedEnvironment) {
+    fail(
+      `deployment environment mismatch expected=${expectedEnvironment} actual=${String(body?.deployment?.environment)}`,
+    );
+  }
 
+  const identity = body?.deployment?.commitSha
+    ? ` sha=${body.deployment.commitSha.slice(0, 12)} env=${String(body.deployment.environment)}`
+    : '';
   console.log(
-    `[production-ai-smoke] capabilities OK: ASR=${body.transcription.model} vision=${body.vision.model}`,
+    `[production-ai-smoke] capabilities OK: ASR=${body.transcription.model} vision=${body.vision.model}${identity}`,
   );
 }
 
