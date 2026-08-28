@@ -13,8 +13,9 @@
  *   - `/api/analyze-frame` receives a handful of downscaled JPEG keyframes for
  *     one window the local scanner already judged significant.
  *
- * Retries are bounded and only ever applied to 429 and 5xx. A 400 or a 401 is
- * reported once, immediately, because retrying it cannot help.
+ * Retries are bounded and only ever applied to genuinely transient failures.
+ * A malformed request, rejected credential, unavailable model or invalid
+ * provider response is reported once because repeating it cannot help.
  */
 
 import {
@@ -67,13 +68,37 @@ interface ApiErrorBody {
 
 const KNOWN_CODES = new Set<string>([
   'ASR_NOT_CONFIGURED',
+  'ASR_BAD_REQUEST',
+  'ASR_AUTH_FAILED',
+  'ASR_MODEL_UNAVAILABLE',
   'ASR_PROVIDER_FAILED',
   'ASR_RATE_LIMITED',
+  'ASR_RESPONSE_INVALID',
   'VISION_NOT_CONFIGURED',
+  'VISION_BAD_REQUEST',
+  'VISION_AUTH_FAILED',
+  'VISION_MODEL_UNAVAILABLE',
   'VISION_PROVIDER_FAILED',
+  'VISION_RATE_LIMITED',
+  'VISION_RESPONSE_INVALID',
   'AI_RESPONSE_INVALID',
   'MESSAGE_INVALID',
   'ANALYSIS_ABORTED',
+]);
+
+const NON_RETRYABLE_CODES = new Set<FrameScriptErrorCode>([
+  'ASR_NOT_CONFIGURED',
+  'ASR_BAD_REQUEST',
+  'ASR_AUTH_FAILED',
+  'ASR_MODEL_UNAVAILABLE',
+  'ASR_RESPONSE_INVALID',
+  'VISION_NOT_CONFIGURED',
+  'VISION_BAD_REQUEST',
+  'VISION_AUTH_FAILED',
+  'VISION_MODEL_UNAVAILABLE',
+  'VISION_RESPONSE_INVALID',
+  'AI_RESPONSE_INVALID',
+  'MESSAGE_INVALID',
 ]);
 
 /**
@@ -93,10 +118,10 @@ async function toError(response: Response, kind: 'asr' | 'vision'): Promise<Fram
   const classified = classifyHttpFailure(response.status, kind);
   const code: FrameScriptErrorCode =
     body.code && KNOWN_CODES.has(body.code) ? (body.code as FrameScriptErrorCode) : classified.code;
-  // A missing configuration is never retried: it will still be missing.
-  const recoverable =
-    code === 'ASR_NOT_CONFIGURED' || code === 'VISION_NOT_CONFIGURED'
-      ? false
+  const recoverable = NON_RETRYABLE_CODES.has(code)
+    ? false
+    : code === 'ASR_RATE_LIMITED' || code === 'VISION_RATE_LIMITED'
+      ? true
       : classified.retryable;
   return new FrameScriptError({
     code,
@@ -235,7 +260,7 @@ export async function analyzeFrames(
       const analysis = validateVisionAnalysis(body.analysis);
       if (!analysis) {
         throw new FrameScriptError({
-          code: 'AI_RESPONSE_INVALID',
+          code: 'VISION_RESPONSE_INVALID',
           detail: 'vision response failed client-side validation',
         });
       }
