@@ -2,12 +2,12 @@
 
 FrameScript ships four surfaces over one engine:
 
-| Surface | Runs where | Use it for |
-| --- | --- | --- |
-| **Browser extension** | Chrome, on YouTube/Netflix | Maximum Quality, and reconstruction while you watch |
-| **Studio (web/mobile)** | Any modern browser, installable | Your own media files, and reading exports |
-| **CLI** | Node 20+ | Scripting, batch conversion, terminal use |
-| **MCP server** | Any MCP client (Codex, Claude Desktop…) | Letting a model work with screenplays |
+| Surface                 | Runs where                              | Use it for                                          |
+| ----------------------- | --------------------------------------- | --------------------------------------------------- |
+| **Browser extension**   | Chrome, on YouTube/Netflix              | Maximum Quality, and reconstruction while you watch |
+| **Studio (web/mobile)** | Any modern browser, installable         | Your own media files, and reading exports           |
+| **CLI**                 | Node 20+                                | Scripting, batch conversion, terminal use           |
+| **MCP server**          | Any MCP client (Codex, Claude Desktop…) | Letting a model work with screenplays               |
 
 The extension is the only one that can see a streaming site's player. The other
 three work on files.
@@ -58,13 +58,13 @@ Installing globally (`npm link`) exposes `framescript` and `framescript-mcp`.
 
 ### Tools
 
-| Tool | Does |
-| --- | --- |
-| `framescript_build` | Reconstruct a screenplay and return it in a chosen format |
-| `framescript_inspect` | Scene/beat counts, speakers, languages, span, coverage, conflicts |
-| `framescript_search` | Search dialogue and action across all languages |
-| `framescript_parse_subtitles` | Return raw cues with timings and any parse failures |
-| `framescript_capabilities` | Describe what the server can and cannot do |
+| Tool                          | Does                                                              |
+| ----------------------------- | ----------------------------------------------------------------- |
+| `framescript_build`           | Reconstruct a screenplay and return it in a chosen format         |
+| `framescript_inspect`         | Scene/beat counts, speakers, languages, span, coverage, conflicts |
+| `framescript_search`          | Search dialogue and action across all languages                   |
+| `framescript_parse_subtitles` | Return raw cues with timings and any parse failures               |
+| `framescript_capabilities`    | Describe what the server can and cannot do                        |
 
 ### Configuration
 
@@ -134,8 +134,9 @@ npm run build:web            # static output in dist-web/
 npm run preview:web
 ```
 
-`dist-web/` is a static bundle — deploy it to any static host. It has no
-backend, and none of the code paths it contains can reach one.
+`dist-web/` is a static bundle — deploy it to any static host. It has no backend
+or secret-bearing client configuration. Public routes and Vercel deployment are
+documented in [Web Studio](WEB_STUDIO.md).
 
 ### What it does
 
@@ -162,7 +163,10 @@ quality. A web page has no way to observe or control another site's player;
 that is what an extension is for. The app says this on its first screen rather
 than letting a user discover it by failing.
 
-Use the extension while watching, then open its export in Studio.
+Use the extension while watching, export the versioned FrameScript JSON project,
+then open it in Studio. The file handoff preserves scenes, languages, characters,
+provenance, coverage and conflicts supported by the project model without putting
+media or screenplay content in a URL.
 
 ---
 
@@ -179,5 +183,5 @@ src/core ──┬── extension  (src/background, src/content, src/offscreen,
 ```
 
 The consequence worth stating: a fix to speaker attribution or scene boundary
-scoring lands in all four at once, and the 433 unit tests cover the engine for
-every one of them.
+scoring lands in all four at once, and the unit suite covers the engine for every
+one of them.

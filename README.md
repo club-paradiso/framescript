@@ -7,12 +7,12 @@ playback at the highest quality actually offered and reconstructs a
 time-synchronized screenplay while you watch — plus a web/mobile app, a CLI, and
 an MCP server that run the same reconstruction over files you already have.
 
-| Surface | Runs where | For |
-| --- | --- | --- |
-| **Extension** | Chrome, on YouTube/Netflix | Maximum Quality, and reconstruction while watching |
-| **Studio** | Any browser, installable as a PWA | Your own media files; reading and converting exports |
-| **CLI** | Node 20+ | Scripting and batch conversion |
-| **MCP server** | Codex, Claude Desktop, Claude Code | Letting a model work with screenplays |
+| Surface        | Runs where                         | For                                                  |
+| -------------- | ---------------------------------- | ---------------------------------------------------- |
+| **Extension**  | Chrome, on YouTube/Netflix         | Maximum Quality, and reconstruction while watching   |
+| **Studio**     | Any browser, installable as a PWA  | Your own media files; reading and converting exports |
+| **CLI**        | Node 20+                           | Scripting and batch conversion                       |
+| **MCP server** | Codex, Claude Desktop, Claude Code | Letting a model work with screenplays                |
 
 Only the extension can see a streaming site's player. The other three work on
 files — see [Integrations](docs/INTEGRATIONS.md).
@@ -59,8 +59,8 @@ such techniques would require.
 
 ## Maximum Quality
 
-The default is *use the highest quality the platform currently makes available* —
-which is not the same as *force 4K regardless of support*.
+The default is _use the highest quality the platform currently makes available_ —
+which is not the same as _force 4K regardless of support_.
 
 **YouTube.** FrameScript drives the real player UI: opens the settings menu,
 reads the options offered, ranks them structurally (resolution → enhanced bitrate
@@ -124,11 +124,11 @@ hesitation is the point.
 
 ### Analysis modes
 
-| Mode | Observation | Deep analysis | For |
-| --- | --- | --- | --- |
-| Efficient | ~5/s | 0.5–2/s | Weaker machines, battery |
-| **Detailed** | **10/s (100 ms)** | **1–10/s adaptive** | **Default** |
-| Forensic | every presented frame | 2–15/s adaptive | High-fidelity study |
+| Mode         | Observation           | Deep analysis       | For                      |
+| ------------ | --------------------- | ------------------- | ------------------------ |
+| Efficient    | ~5/s                  | 0.5–2/s             | Weaker machines, battery |
+| **Detailed** | **10/s (100 ms)**     | **1–10/s adaptive** | **Default**              |
+| Forensic     | every presented frame | 2–15/s adaptive     | High-fidelity study      |
 
 Forensic keeps denser evidence and allows denser analysis of important windows.
 It does not upload the film frame by frame; nothing does.
@@ -163,10 +163,10 @@ npm run dev         # extension watch build
 npm run dev:web     # Studio dev server
 npm run typecheck   # tsc: src, tests/e2e, and build scripts
 npm run lint        # eslint, zero warnings tolerated
-npm test            # vitest — 444 tests
+npm test            # vitest unit and regression suite
 npm run verify      # typecheck + lint + test + build
 npm run build:all   # extension + Studio + CLI/MCP
-npm run test:e2e    # Playwright — 20 tests in real Chrome
+npm run test:e2e    # Playwright production flows in real Chrome
 npm run check:mcp   # MCP server over its real stdio transport
 npm run benchmark   # engine throughput + structural invariants
 npm run fixtures    # regenerate the synthetic media fixtures
@@ -215,14 +215,14 @@ capable multimodal model. That is opt-in, uses your own key, and requires two
 separate actions in Settings → AI: acknowledging a notice that enumerates exactly
 what would be sent, then enabling the feature.
 
-| Capability | Local default | Optional provider |
-| --- | --- | --- |
-| Scene understanding | Motion/change analysis only | Anthropic (your key) |
-| Speech recognition | *Unavailable* — see below | Any OpenAI-compatible endpoint |
-| On-screen text | Region detection, no reading | Via the vision provider |
-| Sound events | Onset detection, conservative labels | — |
-| Speaker clustering | Local, always | — |
-| Translation | Unavailable | Anthropic (your key) |
+| Capability          | Local default                        | Optional provider              |
+| ------------------- | ------------------------------------ | ------------------------------ |
+| Scene understanding | Motion/change analysis only          | Anthropic (your key)           |
+| Speech recognition  | _Unavailable_ — see below            | Any OpenAI-compatible endpoint |
+| On-screen text      | Region detection, no reading         | Via the vision provider        |
+| Sound events        | Onset detection, conservative labels | —                              |
+| Speaker clustering  | Local, always                        | —                              |
+| Translation         | Unavailable                          | Anthropic (your key)           |
 
 Keys live in `chrome.storage.local` — not `sync`, so the browser does not
 replicate them to your other machines.
@@ -293,16 +293,17 @@ FrameScript reconstructs only what it observed and never fills gaps.
 
 ## Documentation
 
-| | |
-| --- | --- |
-| [Architecture](docs/ARCHITECTURE.md) | Contexts, pipelines, data flow |
-| [Privacy](docs/PRIVACY.md) | What is held, for how long, what leaves |
-| [Permissions](docs/PERMISSIONS.md) | Each permission and its justification |
-| [Platform limitations](docs/PLATFORM_LIMITATIONS.md) | What cannot be done, and why |
-| [Performance](docs/PERFORMANCE.md) | Backpressure, budgets, measured costs |
-| [QA](docs/QA.md) | Manual test checklist |
-| [Integrations](docs/INTEGRATIONS.md) | Studio, CLI, MCP server, Claude Code skill |
-| [Store listing](docs/STORE_LISTING.md) | Chrome Web Store copy |
+|                                                      |                                                      |
+| ---------------------------------------------------- | ---------------------------------------------------- |
+| [Architecture](docs/ARCHITECTURE.md)                 | Contexts, pipelines, data flow                       |
+| [Privacy](docs/PRIVACY.md)                           | What is held, for how long, what leaves              |
+| [Permissions](docs/PERMISSIONS.md)                   | Each permission and its justification                |
+| [Platform limitations](docs/PLATFORM_LIMITATIONS.md) | What cannot be done, and why                         |
+| [Performance](docs/PERFORMANCE.md)                   | Backpressure, budgets, measured costs                |
+| [QA](docs/QA.md)                                     | Manual test checklist                                |
+| [Integrations](docs/INTEGRATIONS.md)                 | Studio, CLI, MCP server, Claude Code skill           |
+| [Web Studio](docs/WEB_STUDIO.md)                     | Routes, local workflows, project format, PWA, Vercel |
+| [Store listing](docs/STORE_LISTING.md)               | Chrome Web Store copy                                |
 
 ## Licence
 
