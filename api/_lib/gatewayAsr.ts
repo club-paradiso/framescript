@@ -1,6 +1,6 @@
 import type { AsrResult, AsrSegment } from '../../src/ai/types.js';
 import { normalizeAsrLanguage } from '../../src/ai/providers/openaiCompatible.js';
-import { providerError } from '../../src/ai/retry.js';
+import { providerResponseError } from '../../src/ai/retry.js';
 import { FrameScriptError } from '../../src/utils/errors.js';
 import { toBase64 } from '../../src/utils/base64.js';
 
@@ -57,10 +57,10 @@ export async function transcribeViaGateway(
   });
 
   if (!response.ok) {
-    throw providerError(
-      response.status,
+    throw await providerResponseError(
+      response,
       'asr',
-      `Vercel AI Gateway transcription returned ${response.status}`,
+      `gateway=vercel model=${request.model} mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
     );
   }
 
@@ -69,8 +69,8 @@ export async function transcribeViaGateway(
     body = (await response.json()) as GatewayTranscriptionResponse;
   } catch {
     throw new FrameScriptError({
-      code: 'AI_RESPONSE_INVALID',
-      detail: 'Vercel AI Gateway transcription response was not JSON',
+      code: 'ASR_RESPONSE_INVALID',
+      detail: `gateway=vercel model=${request.model} response=non-json`,
     });
   }
 
@@ -98,7 +98,12 @@ function normalizeGatewaySegments(raw: unknown): AsrSegment[] {
 
     const startSeconds = finite(segment.startSecond) ?? finite(segment.start);
     const endSeconds = finite(segment.endSecond) ?? finite(segment.end);
-    if (startSeconds === null || endSeconds === null || startSeconds < 0 || endSeconds < startSeconds) {
+    if (
+      startSeconds === null ||
+      endSeconds === null ||
+      startSeconds < 0 ||
+      endSeconds < startSeconds
+    ) {
       continue;
     }
     result.push({
