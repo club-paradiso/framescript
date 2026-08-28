@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readAsrConfig } from '../api/_lib/config';
+import { readAsrConfig, readVisionConfig } from '../api/_lib/config';
 import { transcribeViaGateway } from '../api/_lib/gatewayAsr';
 
 const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
@@ -7,6 +7,11 @@ const originalOidc = process.env.VERCEL_OIDC_TOKEN;
 const originalFrameScriptKey = process.env.FRAMESCRIPT_ASR_API_KEY;
 const originalFrameScriptModel = process.env.FRAMESCRIPT_ASR_MODEL;
 const originalGatewayModel = process.env.FRAMESCRIPT_GATEWAY_ASR_MODEL;
+const originalVisionKey = process.env.FRAMESCRIPT_VISION_API_KEY;
+const originalVisionProvider = process.env.FRAMESCRIPT_VISION_PROVIDER;
+const originalVisionEndpoint = process.env.FRAMESCRIPT_VISION_ENDPOINT;
+const originalVisionModel = process.env.FRAMESCRIPT_VISION_MODEL;
+const originalGatewayVisionModel = process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL;
 const requestContextSymbol = Symbol.for('@vercel/request-context');
 const originalRequestContext = (
   globalThis as typeof globalThis & {
@@ -20,6 +25,11 @@ afterEach(() => {
   restore('FRAMESCRIPT_ASR_API_KEY', originalFrameScriptKey);
   restore('FRAMESCRIPT_ASR_MODEL', originalFrameScriptModel);
   restore('FRAMESCRIPT_GATEWAY_ASR_MODEL', originalGatewayModel);
+  restore('FRAMESCRIPT_VISION_API_KEY', originalVisionKey);
+  restore('FRAMESCRIPT_VISION_PROVIDER', originalVisionProvider);
+  restore('FRAMESCRIPT_VISION_ENDPOINT', originalVisionEndpoint);
+  restore('FRAMESCRIPT_VISION_MODEL', originalVisionModel);
+  restore('FRAMESCRIPT_GATEWAY_VISION_MODEL', originalGatewayVisionModel);
 
   const runtime = globalThis as typeof globalThis & {
     [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
@@ -71,6 +81,56 @@ describe('Vercel AI Gateway ASR configuration', () => {
       provider: 'openai-compatible',
       apiKey: 'explicit-key',
       model: 'custom-model',
+    });
+  });
+});
+
+describe('Vercel AI Gateway vision configuration', () => {
+  it('uses the per-request Vercel OIDC context when no long-lived vision key exists', () => {
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    delete process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL;
+
+    const runtime = globalThis as typeof globalThis & {
+      [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
+    };
+    runtime[requestContextSymbol] = {
+      get: () => ({ headers: { 'x-vercel-oidc-token': 'request-context-token' } }),
+    };
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+      apiKey: 'request-context-token',
+      model: 'openai/gpt-5.6-luna-fast',
+    });
+  });
+
+  it('supports overriding only the Gateway vision model', () => {
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL = 'google/gemini-3.7-flash';
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      apiKey: 'gateway-key',
+      model: 'google/gemini-3.7-flash',
+    });
+  });
+
+  it('keeps an explicitly configured vision provider authoritative', () => {
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.FRAMESCRIPT_VISION_PROVIDER = 'openai-compatible';
+    process.env.FRAMESCRIPT_VISION_API_KEY = 'explicit-vision-key';
+    process.env.FRAMESCRIPT_VISION_ENDPOINT = 'https://example.test/v1/chat/completions';
+    process.env.FRAMESCRIPT_VISION_MODEL = 'custom-vision-model';
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'openai-compatible',
+      apiKey: 'explicit-vision-key',
+      endpoint: 'https://example.test/v1/chat/completions',
+      model: 'custom-vision-model',
     });
   });
 });
