@@ -26,6 +26,7 @@ import {
   methodNotAllowed,
   tooLarge,
 } from './_lib/http.js';
+import { transcribeViaGateway } from './_lib/gatewayAsr.js';
 import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
 import { transcribeWav } from '../src/ai/providers/openaiCompatible.js';
 import { FrameScriptError } from '../src/utils/errors.js';
@@ -73,14 +74,24 @@ export async function POST(request: Request): Promise<Response> {
   if (!looksLikeWav(wav)) return badRequest('Audio part is not a WAV window.');
 
   try {
-    const result = await transcribeWav({
-      wav,
-      endpoint: asr.endpoint,
-      apiKey: asr.apiKey,
-      model: asr.model,
-      ...(languageHint ? { languageHint } : {}),
-      ...(request.signal ? { signal: request.signal } : {}),
-    });
+    const result =
+      asr.provider === 'vercel-ai-gateway'
+        ? await transcribeViaGateway({
+            wav,
+            endpoint: asr.endpoint,
+            token: asr.apiKey,
+            model: asr.model,
+            ...(languageHint ? { languageHint } : {}),
+            ...(request.signal ? { signal: request.signal } : {}),
+          })
+        : await transcribeWav({
+            wav,
+            endpoint: asr.endpoint,
+            apiKey: asr.apiKey,
+            model: asr.model,
+            ...(languageHint ? { languageHint } : {}),
+            ...(request.signal ? { signal: request.signal } : {}),
+          });
 
     if (!result) return json({ start: startMs, end: endMs, text: '', segments: [] });
 
