@@ -25,7 +25,7 @@ import {
   exportScreenplay,
   formatTimecode,
   languageFromFilename,
-  migrateScreenplay,
+  parseFrameScriptProject,
   parseSubtitleFile,
   renderScreenplay,
   searchScreenplay,
@@ -73,7 +73,8 @@ function parseArgs(argv: readonly string[]): Args {
 const str = (flags: Args['flags'], key: string): string | undefined =>
   typeof flags[key] === 'string' ? (flags[key] as string) : undefined;
 
-const bool = (flags: Args['flags'], key: string): boolean => flags[key] === true || flags[key] === 'true';
+const bool = (flags: Args['flags'], key: string): boolean =>
+  flags[key] === true || flags[key] === 'true';
 
 // --- Loading -------------------------------------------------------------------
 
@@ -107,33 +108,14 @@ async function load(paths: readonly string[], flags: Args['flags']): Promise<Loa
 
     if (extname(path).toLowerCase() === '.json') {
       const parsed: unknown = JSON.parse(content);
-      const record = parsed as {
-        scenes?: ReconstructedScene[];
-        characters?: CharacterEntity[];
-        metadata?: ExportMetadata;
-        format?: string;
-      };
-
-      // Accept both a FrameScript export and a stored screenplay record.
-      const migrated = migrateScreenplay(parsed);
-      if (migrated) {
-        jsonScenes = migrated.record.scenes;
-        jsonCharacters = migrated.record.characters;
-        metadata = {
-          ...(migrated.record.title ? { title: migrated.record.title } : {}),
-          ...(migrated.record.seriesTitle ? { seriesTitle: migrated.record.seriesTitle } : {}),
-          ...(migrated.record.season === undefined ? {} : { season: migrated.record.season }),
-          ...(migrated.record.episode === undefined ? {} : { episode: migrated.record.episode }),
-          ...(migrated.record.platform ? { platform: migrated.record.platform } : {}),
-        };
-        durationMs = migrated.record.coverage.durationMs;
-      } else if (Array.isArray(record.scenes)) {
-        jsonScenes = record.scenes;
-        jsonCharacters = record.characters ?? [];
-        metadata = record.metadata ?? {};
-      } else {
-        throw new UserError(`${path} is not a FrameScript export.`);
-      }
+      const project = parseFrameScriptProject(parsed);
+      if (!project.ok) throw new UserError(`${path}: ${project.error}`);
+      jsonScenes = project.project.scenes;
+      jsonCharacters = project.project.characters;
+      metadata = project.project.metadata;
+      durationMs = project.project.coverage.durationMs;
+      for (const warning of project.warnings)
+        process.stderr.write(`warning: ${path}: ${warning}\n`);
       continue;
     }
 
@@ -151,7 +133,9 @@ async function load(paths: readonly string[], flags: Args['flags']): Promise<Loa
     // stop the same line in two languages from merging into one beat.
     const detected = languageFromFilename(basename(path));
     const language =
-      detected !== 'und' ? detected : (str(flags, 'input-language') ?? str(flags, 'language') ?? 'en');
+      detected !== 'und'
+        ? detected
+        : (str(flags, 'input-language') ?? str(flags, 'language') ?? 'en');
     evidence.push(
       ...cuesToEvidence(result.cues, {
         language,
@@ -196,7 +180,8 @@ function languagesOf(scenes: readonly ReconstructedScene[]): string[] {
   const codes = new Set<string>();
   for (const scene of scenes) {
     for (const beat of scene.beats) {
-      if (beat.type === 'dialogue') for (const code of Object.keys(beat.textVariants)) codes.add(code);
+      if (beat.type === 'dialogue')
+        for (const code of Object.keys(beat.textVariants)) codes.add(code);
     }
   }
   return [...codes].filter((c) => c !== 'und');
@@ -209,7 +194,9 @@ async function cmdBuild(args: Args): Promise<void> {
   const language = str(args.flags, 'language') ?? loaded.languages[0] ?? 'en';
   const format = (str(args.flags, 'format') ?? 'fountain') as ExportFormat;
   if (!EXPORT_FORMATS.includes(format)) {
-    throw new UserError(`Unknown format "${format}". Expected one of: ${EXPORT_FORMATS.join(', ')}`);
+    throw new UserError(
+      `Unknown format "${format}". Expected one of: ${EXPORT_FORMATS.join(', ')}`,
+    );
   }
 
   const document = renderScreenplay(loaded.scenes, {
@@ -263,7 +250,9 @@ async function cmdInspect(args: Args): Promise<void> {
   if (loaded.characters.length > 0) {
     lines.push('', 'Speakers:');
     for (const character of loaded.characters.slice(0, 20)) {
-      lines.push(`  ${(character.displayName ?? character.id).padEnd(20)} ${character.lineCount} lines`);
+      lines.push(
+        `  ${(character.displayName ?? character.id).padEnd(20)} ${character.lineCount} lines`,
+      );
     }
   }
   if (loaded.coverageNotes.length > 0) lines.push('', ...loaded.coverageNotes);
@@ -272,7 +261,10 @@ async function cmdInspect(args: Args): Promise<void> {
 }
 
 async function cmdSearch(args: Args): Promise<void> {
-  const [query, ...paths] = [args.positionals[args.positionals.length - 1], ...args.positionals.slice(0, -1)];
+  const [query, ...paths] = [
+    args.positionals[args.positionals.length - 1],
+    ...args.positionals.slice(0, -1),
+  ];
   if (!query || paths.length === 0) {
     throw new UserError('Usage: framescript search <file...> <query>');
   }
@@ -293,7 +285,9 @@ async function cmdSearch(args: Args): Promise<void> {
   for (const result of results) {
     const who = result.characterName ? `${result.characterName}: ` : '';
     const lang = result.language ? ` [${result.language}]` : '';
-    process.stdout.write(`${formatTimecode(result.start).padStart(8)}  ${who}${result.snippet}${lang}\n`);
+    process.stdout.write(
+      `${formatTimecode(result.start).padStart(8)}  ${who}${result.snippet}${lang}\n`,
+    );
   }
   process.stderr.write(`\n${results.length} match${results.length === 1 ? '' : 'es'}\n`);
 }

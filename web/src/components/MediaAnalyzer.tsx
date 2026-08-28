@@ -33,19 +33,19 @@ export function MediaAnalyzer({
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [objectUrl, setObjectUrl] = useState<string>();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const urlRef = useRef<string | null>(null);
-
   useEffect(() => {
     const url = URL.createObjectURL(file);
-    urlRef.current = url;
+    setObjectUrl(url);
     setDone(null);
     setProgress(null);
+    setError(null);
     return () => {
       URL.revokeObjectURL(url);
-      urlRef.current = null;
+      setObjectUrl(undefined);
       abortRef.current?.abort();
     };
   }, [file]);
@@ -73,9 +73,17 @@ export function MediaAnalyzer({
           summary.push('no decodable audio track');
         } else {
           durationMs = Math.max(durationMs, secondsToMs(buffer.duration));
-          setProgress({ phase: 'audio', ratio: 0, message: 'Analyzing speech, speakers and sound…' });
+          setProgress({
+            phase: 'audio',
+            ratio: 0,
+            message: 'Analyzing speech, speakers and sound…',
+          });
           const audio = await analyzeAudioBuffer(buffer, (ratio) =>
-            setProgress({ phase: 'audio', ratio, message: 'Analyzing speech, speakers and sound…' }),
+            setProgress({
+              phase: 'audio',
+              ratio,
+              message: 'Analyzing speech, speakers and sound…',
+            }),
           );
           events.push(...audio.events);
           summary.push(
@@ -94,13 +102,21 @@ export function MediaAnalyzer({
         }
         durationMs = Math.max(durationMs, secondsToMs(video.duration || 0));
 
-        setProgress({ phase: 'video', ratio: 0, message: `Observing the picture at ${scanRate}×…` });
+        setProgress({
+          phase: 'video',
+          ratio: 0,
+          message: `Observing the picture at ${scanRate}×…`,
+        });
         const scan = await scanVideoDuringPlayback(video, {
           fidelity,
           scanRate,
           signal: controller.signal,
           onProgress: (ratio) =>
-            setProgress({ phase: 'video', ratio, message: `Observing the picture at ${scanRate}×…` }),
+            setProgress({
+              phase: 'video',
+              ratio,
+              message: `Observing the picture at ${scanRate}×…`,
+            }),
         });
         events.push(...scan.events);
         summary.push(
@@ -113,7 +129,11 @@ export function MediaAnalyzer({
       setDone(text);
       onComplete(events, durationMs, text);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Analysis failed.');
+      setError(
+        err instanceof DOMException && err.name === 'NotSupportedError'
+          ? 'This browser cannot decode that media file. Try a broadly supported MP4, WebM, MP3, or WAV file.'
+          : 'Local analysis failed. The file remains available so you can adjust the sources and try again.',
+      );
     } finally {
       setProgress(null);
       abortRef.current = null;
@@ -132,7 +152,7 @@ export function MediaAnalyzer({
       {isVideo && (
         <video
           ref={videoRef}
-          src={urlRef.current ?? undefined}
+          src={objectUrl}
           className="analyzer__video"
           playsInline
           muted
@@ -174,8 +194,8 @@ export function MediaAnalyzer({
             onChange={(e) => setScanRate(Number(e.target.value))}
           />
           <p className="muted small">
-            The picture is observed while the file plays, so a scan takes the runtime divided by this rate.
-            Faster means fewer observations per second of media.
+            The picture is observed while the file plays, so a scan takes the runtime divided by
+            this rate. Faster means fewer observations per second of media.
           </p>
         </div>
       )}
@@ -205,8 +225,24 @@ export function MediaAnalyzer({
 
       {running ? (
         <>
-          <div className="progress" role="progressbar" aria-valuenow={Math.round((progress.ratio ?? 0) * 100)}>
-            <div className="progress__bar" style={{ width: `${(progress.ratio ?? 0) * 100}%` }} />
+          <div
+            className={`progress${progress.ratio === undefined ? ' progress--indeterminate' : ''}`}
+            role="progressbar"
+            aria-label={progress.message}
+            {...(progress.ratio === undefined
+              ? {}
+              : {
+                  'aria-valuenow': Math.round(progress.ratio * 100),
+                  'aria-valuemin': 0,
+                  'aria-valuemax': 100,
+                })}
+          >
+            <div
+              className="progress__bar"
+              style={
+                progress.ratio === undefined ? undefined : { width: `${progress.ratio * 100}%` }
+              }
+            />
           </div>
           <p className="muted small">{progress.message}</p>
           <button className="button" onClick={stop}>
@@ -214,7 +250,11 @@ export function MediaAnalyzer({
           </button>
         </>
       ) : (
-        <button className="button button--primary" onClick={() => void run()}>
+        <button
+          className="button button--primary"
+          disabled={!analyzeAudio && (!isVideo || !analyzeVideo)}
+          onClick={() => void run()}
+        >
           Analyze
         </button>
       )}
@@ -224,7 +264,8 @@ export function MediaAnalyzer({
 
       <p className="muted small">
         Local analysis finds speech, speakers, sound, silence, motion and scene changes. It does not
-        transcribe speech or describe what is visible — that needs a model, which this app does not bundle.
+        transcribe speech or describe what is visible — that needs a model, which this app does not
+        bundle.
       </p>
     </section>
   );

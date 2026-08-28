@@ -12,6 +12,13 @@ import { slugify } from '../../utils/text';
 import { describeSources } from '../../evidence/provenance';
 import type { ReconstructedScene } from '../../scenes/types';
 import type { CharacterEntity } from '../../characters/entities';
+import type { FusionConflict } from '../../scenes/fusion';
+import {
+  FRAMESCRIPT_PROJECT_FORMAT,
+  FRAMESCRIPT_PROJECT_VERSION,
+  type ProjectCoverage,
+  type ProjectSourceSummary,
+} from '../../storage/projectFormat';
 import type { ScreenplayDocument } from '../types';
 import { documentToText } from '../languageRenderer';
 import { toFountain, type ExportMetadata, type FountainOptions } from './fountain';
@@ -33,14 +40,26 @@ export interface ExportResult {
   content: string;
 }
 
+export interface ExportExtras {
+  scenes?: readonly ReconstructedScene[];
+  characters?: readonly CharacterEntity[];
+  languages?: readonly string[];
+  coverage?: ProjectCoverage;
+  conflicts?: readonly FusionConflict[];
+  sources?: readonly ProjectSourceSummary[];
+}
+
 export function exportScreenplay(
   document: ScreenplayDocument,
   metadata: ExportMetadata,
   options: ExportOptions,
-  extras: { scenes?: readonly ReconstructedScene[]; characters?: readonly CharacterEntity[] } = {},
+  extras: ExportExtras = {},
 ): ExportResult {
   const filtered = options.dialogueOnly
-    ? { ...document, lines: document.lines.filter((l) => l.kind === 'dialogue' || l.kind === 'character') }
+    ? {
+        ...document,
+        lines: document.lines.filter((l) => l.kind === 'dialogue' || l.kind === 'character'),
+      }
     : document;
 
   switch (options.format) {
@@ -123,7 +142,10 @@ export function toMarkdown(
         break;
     }
   }
-  return `${out.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
+  return `${out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()}\n`;
 }
 
 function buildTags(
@@ -135,7 +157,8 @@ function buildTags(
   if (line.origin === 'audio-asr') parts.push('audio transcription');
   if (line.fallbackLanguage) parts.push(`shown in ${line.fallbackLanguage}`);
   if (options.includeConfidence && line.confidence) parts.push(line.confidence);
-  if (options.includeEvidenceRefs && line.provenance) parts.push(describeSources(line.provenance.sources));
+  if (options.includeEvidenceRefs && line.provenance)
+    parts.push(describeSources(line.provenance.sources));
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
@@ -153,7 +176,9 @@ export function toSrt(document: ScreenplayDocument): string {
   dialogue.forEach((line, index) => {
     const end = line.end ?? line.start + 2_000;
     out.push(String(index + 1));
-    out.push(`${formatSrtTimestamp(line.start)} --> ${formatSrtTimestamp(Math.max(end, line.start + 500))}`);
+    out.push(
+      `${formatSrtTimestamp(line.start)} --> ${formatSrtTimestamp(Math.max(end, line.start + 500))}`,
+    );
     out.push(line.text);
     if (line.secondaryText) out.push(line.secondaryText);
     out.push('');
@@ -165,18 +190,22 @@ export function toSrt(document: ScreenplayDocument): string {
 export function toJson(
   document: ScreenplayDocument,
   metadata: ExportMetadata,
-  extras: { scenes?: readonly ReconstructedScene[]; characters?: readonly CharacterEntity[] } = {},
+  extras: ExportExtras = {},
 ): string {
   return `${JSON.stringify(
     {
-      format: 'framescript-screenplay',
-      formatVersion: 1,
+      format: FRAMESCRIPT_PROJECT_FORMAT,
+      formatVersion: FRAMESCRIPT_PROJECT_VERSION,
       notice: RECONSTRUCTION_NOTICE,
       metadata,
       language: document.language,
       lines: document.lines,
       scenes: extras.scenes ?? undefined,
       characters: extras.characters ?? undefined,
+      languages: extras.languages ?? [document.language],
+      coverage: extras.coverage ?? { observed: [], uncovered: [], notes: metadata.coverage ?? [] },
+      conflicts: extras.conflicts ?? [],
+      sources: extras.sources ?? [],
     },
     null,
     2,
@@ -186,14 +215,20 @@ export function toJson(
 /**
  * Builds a filesystem-safe filename, e.g. `the-bear-s02e03.ko.fountain`.
  */
-export function buildFilename(metadata: ExportMetadata, language: string, extension: string): string {
+export function buildFilename(
+  metadata: ExportMetadata,
+  language: string,
+  extension: string,
+): string {
   const parts: string[] = [];
   if (metadata.seriesTitle) parts.push(slugify(metadata.seriesTitle));
   else if (metadata.title) parts.push(slugify(metadata.title));
   else parts.push('framescript');
 
   if (metadata.season !== undefined && metadata.episode !== undefined) {
-    parts.push(`s${String(metadata.season).padStart(2, '0')}e${String(metadata.episode).padStart(2, '0')}`);
+    parts.push(
+      `s${String(metadata.season).padStart(2, '0')}e${String(metadata.episode).padStart(2, '0')}`,
+    );
   } else if (metadata.seriesTitle && metadata.title) {
     parts.push(slugify(metadata.title, 40));
   }

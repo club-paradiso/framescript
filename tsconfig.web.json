@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client"]
+  },
+  "include": [
+    "web/src",
+    "src/core",
+    "src/evidence",
+    "src/scenes",
+    "src/screenplay",
+    "src/storage",
+    "src/capture",
+    "src/characters",
+    "src/audio",
+    "src/temporal",
+    "src/quality",
+    "src/utils"
+  ],
+  "exclude": ["dist-web", "node_modules"]
+}

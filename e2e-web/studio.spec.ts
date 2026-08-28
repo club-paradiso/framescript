@@ -1,36 +1,21 @@
-/**
- * FrameScript Studio end-to-end tests.
- *
- * Drives the built PWA in a real browser with real subtitle files, verifying
- * the whole path: file intake -> parsing -> reconstruction -> rendering ->
- * search -> export. This is the check the unit suite cannot make, because it
- * exercises the File API, the object-URL download path, and the shared engine
- * running in a browser rather than in Node.
- */
+/** Production-build user journeys for FrameScript Web Studio. */
 
-import { test, expect, chromium, type Browser, type Page } from '@playwright/test';
-import { fileURLToPath } from 'node:url';
+import { expect, test, chromium, type Browser, type Page } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const DIST = fileURLToPath(new URL('../dist-web', import.meta.url));
-
 const MIME: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'text/javascript',
   '.css': 'text/css',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
   '.webmanifest': 'application/manifest+json',
 };
 
-/**
- * A tiny static server.
- *
- * The app is served over HTTP rather than file:// because a file:// origin is
- * opaque, which breaks module loading and the service worker — neither of
- * which is a real property of the app.
- */
 function serve(root: string): Promise<{ server: Server; origin: string }> {
   return new Promise((resolve) => {
     const server = createServer((req, res) => {
@@ -40,7 +25,9 @@ function serve(root: string): Promise<{ server: Server; origin: string }> {
       if (!existsSync(filePath)) filePath = join(root, 'index.html');
       try {
         const body = readFileSync(filePath);
-        res.writeHead(200, { 'content-type': MIME[extname(filePath)] ?? 'application/octet-stream' });
+        res.writeHead(200, {
+          'content-type': MIME[extname(filePath)] ?? 'application/octet-stream',
+        });
         res.end(body);
       } catch {
         res.writeHead(404).end();
@@ -107,119 +94,202 @@ test.afterAll(async () => {
 
 test.beforeEach(async () => {
   page = await browser.newPage();
-  await page.goto(origin);
 });
 
 test.afterEach(async () => page?.close());
 
-async function drop(files: { name: string; buffer: Buffer }[]) {
+async function openStudio(path = '/studio') {
+  await page.goto(origin + path);
+  await expect(
+    page.getByRole('heading', { name: /Drop files|Open a FrameScript project/ }),
+  ).toBeVisible();
+}
+
+async function upload(files: { name: string; buffer: Buffer; mimeType?: string }[]) {
   await page.setInputFiles(
     '#framescript-file-input',
-    files.map((f) => ({ name: f.name, mimeType: 'text/plain', buffer: f.buffer })),
+    files.map((file) => ({
+      name: file.name,
+      mimeType: file.mimeType ?? 'text/plain',
+      buffer: file.buffer,
+    })),
   );
 }
 
-test('states plainly that it cannot analyze YouTube or Netflix', async () => {
-  await expect(page.getByRole('heading', { name: 'What this cannot do' })).toBeVisible();
-  await expect(page.getByText(/cannot analyze YouTube or Netflix/i)).toBeVisible();
-  await expect(page.getByText(/FrameScript browser extension/i)).toBeVisible();
+test('landing page explains the product, privacy, and extension boundary', async () => {
+  await page.goto(origin + '/');
+  await expect(
+    page.getByRole('heading', { name: /Turn video into a structured screenplay/i }),
+  ).toBeVisible();
+  await expect(page.getByRole('link', { name: /Open Studio/i }).first()).toHaveAttribute(
+    'href',
+    '/studio',
+  );
+  await expect(page.getByText(/Your media stays local/i)).toBeVisible();
+  await expect(
+    page.getByText(/Live YouTube and Netflix playback requires the Chrome Extension/i),
+  ).toBeVisible();
+  await expect(page.getByText(/Every screenplay beat retains its sources/i)).toBeVisible();
 });
 
-test('reconstructs a screenplay from a subtitle file', async () => {
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+test('direct navigation to every public app route works', async () => {
+  await openStudio();
+  await page.goto(origin + '/view');
+  await expect(page.getByRole('heading', { name: 'Open a FrameScript project.' })).toBeVisible();
+  await page.goto(origin + '/docs');
+  await expect(page.getByRole('heading', { name: 'FrameScript documentation' })).toBeVisible();
+});
 
-  // Speaker labels became character cues, not dialogue text.
-  await expect(page.getByText('JIYEON').first()).toBeVisible();
-  await expect(page.getByText("We're out of milk.")).toBeVisible();
-  // A bracketed caption became a sound beat, not a spoken line.
+test('installs an offline shell without caching user files', async () => {
+  await openStudio();
+  const state = await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    const keys = await caches.keys();
+    const requests = (
+      await Promise.all(keys.map(async (key) => (await caches.open(key)).keys()))
+    ).flat();
+    return {
+      scope: registration.scope,
+      keys,
+      cachedUrls: requests.map((request) => request.url),
+    };
+  });
+  expect(state.scope).toBe(origin + '/');
+  expect(state.keys).toContain('framescript-studio-v2');
+  expect(state.cachedUrls.every((url) => !url.startsWith('blob:'))).toBe(true);
+
+  await page.context().setOffline(true);
+  try {
+    await page.goto(origin + '/studio');
+    await expect(
+      page.getByRole('heading', { name: 'Drop files. Build the script.' }),
+    ).toBeVisible();
+  } finally {
+    await page.context().setOffline(false);
+  }
+});
+
+test('uploads subtitles, reconstructs a navigable screenplay, and shows honest coverage', async () => {
+  await openStudio();
+  await upload([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+
+  await expect(page.locator('.line__text', { hasText: "We're out of milk." })).toBeVisible();
   await expect(page.getByText('Refrigerator door closes.')).toBeVisible();
-
   await expect(page.getByText('4 cues · SRT')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Scenes' }).locator('li')).toHaveCount(2);
+
+  await page.getByRole('tab', { name: 'Coverage' }).click();
+  await expect(page.getByText('100% observed')).toBeVisible();
+  await expect(
+    page.getByText(/measures observed ranges, not screenplay completeness/i),
+  ).toBeVisible();
 });
 
-test('reports reconstruction statistics', async () => {
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
-
-  const stats = page.locator('.stats');
-  await expect(stats.getByText('Dialogue')).toBeVisible();
-  // Three spoken lines and one sound beat, from four cues.
-  await expect(stats.locator('.stats__item', { hasText: 'Dialogue' }).locator('dd')).toHaveText('3');
-  await expect(stats.locator('.stats__item', { hasText: 'Sound' }).locator('dd')).toHaveText('1');
-  await expect(stats.locator('.stats__item', { hasText: 'Speakers' }).locator('dd')).toHaveText('2');
-});
-
-test('reports 100% coverage for a complete subtitle file', async () => {
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
-  // The gaps between cues were observed; they simply had no dialogue.
-  await expect(page.getByText(/100% of the media was observed/)).toBeVisible();
-});
-
-test('merges two languages into one dual-language script', async () => {
-  await drop([
+test('aligns EN and KO into shared scenes and switches to dual-language display', async () => {
+  await openStudio();
+  await upload([
     { name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) },
     { name: 'demo.ko.srt', buffer: Buffer.from(KO_SRT) },
   ]);
 
   await page.getByLabel('Script language').selectOption('ko');
   await page.getByLabel('Second language').selectOption('en');
-
-  // One beat carrying both variants, not two separate beats.
   const dialogue = page.locator('.line--dialogue').first();
   await expect(dialogue.locator('.line__text')).toHaveText('우유가 없네.');
   await expect(dialogue.locator('.line__secondary')).toHaveText("We're out of milk.");
+  await expect(page.getByRole('navigation', { name: 'Scenes' }).locator('li')).toHaveCount(2);
 });
 
-test('warns when a filename carries no language marker', async () => {
-  await drop([{ name: 'nomarker.srt', buffer: Buffer.from(EN_SRT) }]);
-  await expect(page.getByText(/No language marker in the filename/i)).toBeVisible();
-});
-
-test('searches across every loaded language', async () => {
-  await drop([
+test('searches every language and navigates from a result to its scene', async () => {
+  await openStudio();
+  await upload([
     { name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) },
     { name: 'demo.ko.srt', buffer: Buffer.from(KO_SRT) },
   ]);
 
-  await page.getByLabel('Search').fill('우산');
+  await page.getByLabel('Search screenplay').fill('우산');
   await expect(page.getByText('1 match')).toBeVisible();
-  await expect(page.locator('.result mark')).toHaveText('우산');
+  await page.locator('.result').click();
+  await expect(page.getByLabel('Search screenplay')).toHaveValue('');
+  await expect(page.locator('.line__text', { hasText: 'Take an umbrella.' })).toBeVisible();
 });
 
-test('shows evidence provenance in the Evidence view', async () => {
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
-  await page.getByRole('tab', { name: 'Evidence' }).click();
-
-  await expect(page.locator('.evidence__confidence').first()).toHaveText('high');
+test('exposes evidence provenance without replacing the readable screenplay', async () => {
+  await openStudio();
+  await upload([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
   await expect(page.getByText('Subtitle').first()).toBeVisible();
+  await page.locator('.script-toolbar').getByRole('tab', { name: 'Evidence' }).click();
+  await expect(page.locator('.evidence__confidence').first()).toHaveText('high');
+  await expect(page.getByText('observed').first()).toBeVisible();
 });
 
-test('exports a Fountain file carrying the reconstruction notice', async () => {
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
-
+test('exports and reopens a versioned native project', async () => {
+  await openStudio();
+  await upload([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByLabel('Export format').selectOption('json');
   const download = page.waitForEvent('download');
-  await page.getByRole('button', { name: /^Export/ }).click();
+  await page.getByRole('button', { name: 'Export en' }).click();
   const file = await download;
+  expect(file.suggestedFilename()).toBe('demo.en.json');
+  const savedPath = await file.path();
+  expect(savedPath).not.toBeNull();
 
-  expect(file.suggestedFilename()).toBe('demo-en.en.fountain');
-  const stream = await file.createReadStream();
-  const content = await new Promise<string>((resolve) => {
-    let text = '';
-    stream.on('data', (chunk) => (text += String(chunk)));
-    stream.on('end', () => resolve(text));
-  });
+  const content = readFileSync(savedPath!);
+  const json = JSON.parse(content.toString()) as Record<string, unknown>;
+  expect(json.format).toBe('framescript-screenplay');
+  expect(json.formatVersion).toBe(2);
+  expect(json.scenes).toBeInstanceOf(Array);
+  expect(json.coverage).toBeTruthy();
 
-  expect(content).toContain("We're out of milk.");
-  expect(content).toContain('NOT an original, shooting, or production screenplay');
+  await page.goto(origin + '/view');
+  await upload([{ name: 'demo.framescript.json', mimeType: 'application/json', buffer: content }]);
+  await expect(page.locator('.line__text', { hasText: "We're out of milk." })).toBeVisible();
+  await expect(page.getByText(/format v2/i)).toBeVisible();
 });
 
-test('rejects a file that is not a screenplay', async () => {
-  await drop([{ name: 'junk.srt', buffer: Buffer.from('this is not a subtitle file at all') }]);
+test('rejects malformed and unsupported input, then remains usable', async () => {
+  await openStudio();
+  await upload([{ name: 'junk.srt', buffer: Buffer.from('not a subtitle file') }]);
   await expect(page.getByText(/No subtitle cues found/i)).toBeVisible();
+  await page.getByRole('button', { name: 'Dismiss message' }).click();
+  await expect(page.getByText(/No subtitle cues found/i)).toHaveCount(0);
+
+  await upload([{ name: 'payload.exe', buffer: Buffer.from('MZ') }]);
+  await expect(page.getByText(/payload\.exe is unsupported/i)).toBeVisible();
+
+  await upload([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+  await expect(page.locator('.line__text', { hasText: "We're out of milk." })).toBeVisible();
 });
 
-test('lays out on a phone viewport without horizontal scrolling', async () => {
+test('detects duplicate inputs and escapes subtitle text', async () => {
+  await openStudio();
+  const unsafe = EN_SRT.replace("We're out of milk.", '<img src=x onerror=window.pwned=true>');
+  await upload([{ name: 'unsafe.en.srt', buffer: Buffer.from(unsafe) }]);
+  await expect(
+    page.locator('.line__text', { hasText: '<img src=x onerror=window.pwned=true>' }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { pwned?: boolean }).pwned)).not.toBe(
+    true,
+  );
+
+  await upload([{ name: 'unsafe.en.srt', buffer: Buffer.from(unsafe) }]);
+  await expect(page.getByText(/already loaded; the duplicate was skipped/i)).toBeVisible();
+});
+
+test('keeps intake, navigation, inspection and export usable at 390px', async () => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await drop([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+  await openStudio();
+  await upload([{ name: 'demo.en.srt', buffer: Buffer.from(EN_SRT) }]);
+
+  await page.getByRole('tab', { name: 'Scenes' }).click();
+  await expect(page.getByRole('navigation', { name: 'Scenes' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Evidence', exact: true }).first().click();
+  await expect(page.getByLabel('Project inspector')).toBeVisible();
+  await page.getByRole('tab', { name: 'Script' }).click();
+  await expect(page.getByLabel('Screenplay', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Export en' })).toBeVisible();
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -227,51 +297,23 @@ test('lays out on a phone viewport without horizontal scrolling', async () => {
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-/**
- * Analysis of a real media file, through the browser.
- *
- * The Node test in `tests/mediaAnalysis.test.ts` runs the engine over the same
- * fixture directly. This one goes through the app: File API intake,
- * `decodeAudioData`, the offline audio pass, and the resulting screenplay —
- * the path a user actually takes, and the only way to exercise the browser
- * codec layer.
- */
-test('analyzes a real audio file end to end', async () => {
-  const wav = readFileSync(fileURLToPath(new URL('../tests/fixtures/fixture-speech.wav', import.meta.url)));
+test('analyzes deterministic local audio without uploading it', async () => {
+  await openStudio();
+  const wav = readFileSync(
+    fileURLToPath(new URL('../tests/fixtures/fixture-speech.wav', import.meta.url)),
+  );
+  const requests: string[] = [];
+  page.on('request', (request) => requests.push(request.url()));
+  await upload([{ name: 'fixture-speech.wav', mimeType: 'audio/wav', buffer: wav }]);
 
-  await page.setInputFiles('#framescript-file-input', [
-    { name: 'fixture-speech.wav', mimeType: 'audio/wav', buffer: wav },
-  ]);
-
-  // The file is recognised as media and offered for analysis, not parsed as text.
-  // The name appears both in the sources list and on the analyzer card, so the
-  // locator is scoped to the card rather than made ambiguous.
   const analyzer = page.locator('.card', { hasText: 'Analyze media' });
-  await expect(analyzer).toBeVisible();
   await expect(analyzer.getByText('fixture-speech.wav')).toBeVisible();
-
+  await expect(
+    page.getByText(/does not transcribe speech or describe what is visible/i),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Analyze', exact: true }).click();
-
-  // Decoding 14 s and running the full offline pass takes a moment.
-  await expect(page.getByText(/Analyzed:/)).toBeVisible({ timeout: 45_000 });
-
-  const summary = await page.getByText(/Analyzed:/).textContent();
-  // The fixture holds exactly two utterances from two voices.
-  expect(summary).toMatch(/2 speech regions/);
-  expect(summary).toMatch(/2 speakers/);
-
-  // Those became evidence, and evidence became a screenplay.
-  const stats = page.locator('.stats');
-  await expect(stats.locator('.stats__item', { hasText: 'Sound' }).locator('dd')).not.toHaveText('0');
-});
-
-test('reports honestly that local analysis does not transcribe or describe', async () => {
-  const wav = readFileSync(fileURLToPath(new URL('../tests/fixtures/fixture-speech.wav', import.meta.url)));
-  await page.setInputFiles('#framescript-file-input', [
-    { name: 'fixture-speech.wav', mimeType: 'audio/wav', buffer: wav },
-  ]);
-
-  // The limit is stated before the user runs anything and wonders where the
-  // dialogue went.
-  await expect(page.getByText(/does not transcribe speech or describe what is visible/i)).toBeVisible();
+  await expect(page.getByText(/Analyzed · 2 speech regions, 2 speakers/)).toBeVisible({
+    timeout: 45_000,
+  });
+  expect(requests.every((url) => url.startsWith(origin))).toBe(true);
 });

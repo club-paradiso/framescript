@@ -108,7 +108,8 @@ function collectLanguages(scenes: readonly ReconstructedScene[]): string[] {
   const codes = new Set<string>();
   for (const scene of scenes) {
     for (const beat of scene.beats) {
-      if (beat.type === 'dialogue') for (const code of Object.keys(beat.textVariants)) codes.add(code);
+      if (beat.type === 'dialogue')
+        for (const code of Object.keys(beat.textVariants)) codes.add(code);
     }
   }
   return [...codes].filter((code) => code !== 'und');
@@ -132,7 +133,10 @@ async function pushMediaTime(session: AnalysisSession): Promise<void> {
 
 // --- Analysis control ----------------------------------------------------------
 
-async function startAnalysis(tabId: number, streamId: string | undefined): Promise<{ ok: boolean; message?: string }> {
+async function startAnalysis(
+  tabId: number,
+  streamId: string | undefined,
+): Promise<{ ok: boolean; message?: string }> {
   const settings = await settingsStore.get();
   const session = await ensureSession(tabId);
 
@@ -182,7 +186,10 @@ async function startAnalysis(tabId: number, streamId: string | undefined): Promi
     // Subtitles may still be running; analysis is degraded, not dead.
     session.setPhase(settings.analysis.sources.subtitles ? 'running' : 'error', message);
     broadcast({ type: 'worker/analysis-status', payload: session.status() });
-    broadcast({ type: 'worker/notice', payload: { code: 'TAB_CAPTURE_FAILED', message, severity: 'warning' } });
+    broadcast({
+      type: 'worker/notice',
+      payload: { code: 'TAB_CAPTURE_FAILED', message, severity: 'warning' },
+    });
     return { ok: settings.analysis.sources.subtitles, message };
   }
 
@@ -224,7 +231,10 @@ onRuntimeMessage<FrameScriptMessage>(async (message, sender) => {
   return undefined;
 });
 
-async function handleContentMessage(message: ContentToWorker, tabId: number | undefined): Promise<unknown> {
+async function handleContentMessage(
+  message: ContentToWorker,
+  tabId: number | undefined,
+): Promise<unknown> {
   if (tabId === undefined) return { ok: false };
   const session = await ensureSession(tabId);
 
@@ -262,7 +272,11 @@ async function handleContentMessage(message: ContentToWorker, tabId: number | un
     case 'content/error':
       broadcast({
         type: 'worker/notice',
-        payload: { code: message.payload.code, message: message.payload.message, severity: 'warning' },
+        payload: {
+          code: message.payload.code,
+          message: message.payload.message,
+          severity: 'warning',
+        },
       });
       return { ok: true };
 
@@ -297,7 +311,11 @@ async function handleOffscreenMessage(message: OffscreenToWorker): Promise<unkno
     case 'offscreen/error':
       broadcast({
         type: 'worker/notice',
-        payload: { code: message.payload.code, message: message.payload.message, severity: 'error' },
+        payload: {
+          code: message.payload.code,
+          message: message.payload.message,
+          severity: 'error',
+        },
       });
       return { ok: true };
 
@@ -313,9 +331,14 @@ async function handleUiMessage(message: UiToWorker): Promise<unknown> {
       if (tabId === undefined) return null;
       const session = await ensureSession(tabId);
       // Ask the content script for fresh state; the worker may have restarted.
-      const state = (await sendToTab(tabId, { type: 'worker/request-state', payload: undefined })) as
-        | { identity?: SessionSnapshot['identity']; state?: SessionSnapshot['player']; quality?: SessionSnapshot['quality'] }
-        | null;
+      const state = (await sendToTab(tabId, {
+        type: 'worker/request-state',
+        payload: undefined,
+      })) as {
+        identity?: SessionSnapshot['identity'];
+        state?: SessionSnapshot['player'];
+        quality?: SessionSnapshot['quality'];
+      } | null;
       if (state?.identity) session.setIdentity(state.identity);
       if (state?.state) session.setPlayerState(state.state);
       if (state?.quality) session.setQuality(state.quality);
@@ -353,7 +376,11 @@ async function handleUiMessage(message: UiToWorker): Promise<unknown> {
 
     case 'ui/assign-speaker': {
       const session = sessions.get(message.payload.tabId);
-      session?.assignSpeaker(message.payload.beatId, message.payload.characterId, message.payload.scope);
+      session?.assignSpeaker(
+        message.payload.beatId,
+        message.payload.characterId,
+        message.payload.scope,
+      );
       return { ok: true };
     }
 
@@ -442,7 +469,29 @@ async function handleExport(payload: {
       includeEvidenceRefs: payload.options.includeEvidenceRefs ?? false,
       dialogueOnly: payload.options.dialogueOnly ?? false,
     },
-    { scenes: session.scenes, characters },
+    {
+      scenes: session.scenes,
+      characters,
+      languages: collectLanguages(session.scenes),
+      coverage: {
+        ...(session.timeline.coverageRatio() === undefined
+          ? {}
+          : { ratio: session.timeline.coverageRatio() }),
+        ...(session.timeline.durationMs === undefined
+          ? {}
+          : { durationMs: session.timeline.durationMs }),
+        observed: session.timeline.coverage().observed,
+        uncovered: session.timeline.uncoveredRanges(),
+        notes: coverageNote(session.timeline.coverageRatio(), session.timeline.uncoveredRanges()),
+      },
+      conflicts: session.conflicts,
+      sources: session.subtitleLanguages.map((track) => ({
+        name: track.label,
+        kind: 'subtitle' as const,
+        ...(track.code ? { language: track.code } : {}),
+        detail: track.source,
+      })),
+    },
   );
 
   broadcast({ type: 'worker/export-ready', payload: result });
@@ -475,7 +524,9 @@ async function handleSave(tabId: number): Promise<unknown> {
       coverage: {
         observed: coverage.observed,
         ...(coverage.durationMs === undefined ? {} : { durationMs: coverage.durationMs }),
-        ...(session.timeline.coverageRatio() === undefined ? {} : { ratio: session.timeline.coverageRatio()! }),
+        ...(session.timeline.coverageRatio() === undefined
+          ? {}
+          : { ratio: session.timeline.coverageRatio()! }),
       },
       scenes: session.scenes,
       characters: session.registry.snapshot(),
