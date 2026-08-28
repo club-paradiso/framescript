@@ -21,10 +21,14 @@ import type {
   VisionAnalysisProvider,
   VisionWindowAnalysis,
   VisionWindowRequest,
-} from '../types';
-import { extractJson } from '../validation';
-import { buildVisionUserPrompt, validateVisionAnalysis, VISION_SYSTEM_PROMPT } from '../schemas/visionWindow';
-import { FrameScriptError } from '../../utils/errors';
+} from '../types.js';
+import { extractJson } from '../validation.js';
+import {
+  buildVisionUserPrompt,
+  validateVisionAnalysis,
+  VISION_SYSTEM_PROMPT,
+} from '../schemas/visionWindow.js';
+import { FrameScriptError } from '../../utils/errors.js';
 
 export interface AnthropicConfig {
   apiKey: string;
