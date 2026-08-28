@@ -7,6 +7,12 @@ const originalOidc = process.env.VERCEL_OIDC_TOKEN;
 const originalFrameScriptKey = process.env.FRAMESCRIPT_ASR_API_KEY;
 const originalFrameScriptModel = process.env.FRAMESCRIPT_ASR_MODEL;
 const originalGatewayModel = process.env.FRAMESCRIPT_GATEWAY_ASR_MODEL;
+const requestContextSymbol = Symbol.for('@vercel/request-context');
+const originalRequestContext = (
+  globalThis as typeof globalThis & {
+    [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
+  }
+)[requestContextSymbol];
 
 afterEach(() => {
   restore('AI_GATEWAY_API_KEY', originalGatewayKey);
@@ -14,6 +20,12 @@ afterEach(() => {
   restore('FRAMESCRIPT_ASR_API_KEY', originalFrameScriptKey);
   restore('FRAMESCRIPT_ASR_MODEL', originalFrameScriptModel);
   restore('FRAMESCRIPT_GATEWAY_ASR_MODEL', originalGatewayModel);
+
+  const runtime = globalThis as typeof globalThis & {
+    [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
+  };
+  if (originalRequestContext === undefined) delete runtime[requestContextSymbol];
+  else runtime[requestContextSymbol] = originalRequestContext;
 });
 
 describe('Vercel AI Gateway ASR configuration', () => {
@@ -26,6 +38,26 @@ describe('Vercel AI Gateway ASR configuration', () => {
     expect(readAsrConfig()).toMatchObject({
       provider: 'vercel-ai-gateway',
       apiKey: 'oidc-test-token',
+      model: 'openai/gpt-4o-transcribe',
+    });
+  });
+
+  it('uses the per-request Vercel OIDC context when the environment snapshot is absent', () => {
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    delete process.env.FRAMESCRIPT_GATEWAY_ASR_MODEL;
+
+    const runtime = globalThis as typeof globalThis & {
+      [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
+    };
+    runtime[requestContextSymbol] = {
+      get: () => ({ headers: { 'x-vercel-oidc-token': 'request-context-token' } }),
+    };
+
+    expect(readAsrConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      apiKey: 'request-context-token',
       model: 'openai/gpt-4o-transcribe',
     });
   });
