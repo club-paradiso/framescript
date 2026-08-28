@@ -33,10 +33,11 @@ export interface GatewayTranscribeRequest {
 /**
  * Sends one already-bounded WAV speech window through Vercel AI Gateway.
  *
- * Vercel's transcription endpoint uses JSON/base64 rather than OpenAI's
- * multipart `/audio/transcriptions` wire format. Authentication can be the
- * deployment's short-lived OIDC token, so production does not need a long-lived
- * OpenAI credential just to turn detected speech into text.
+ * This mirrors the current `@ai-sdk/gateway` v4 transcription transport:
+ * model id + transcription specification version headers, and a JSON body with
+ * base64 audio plus its media type. Keeping the wire contract aligned with the
+ * official provider matters because the v4 endpoint rejects an incomplete
+ * model envelope before it ever reaches the upstream ASR provider.
  */
 export async function transcribeViaGateway(
   request: GatewayTranscribeRequest,
@@ -47,6 +48,7 @@ export async function transcribeViaGateway(
     headers: {
       authorization: `Bearer ${request.token}`,
       'content-type': 'application/json',
+      'ai-transcription-model-specification-version': '4',
       'ai-model-id': request.model,
     },
     body: JSON.stringify({
@@ -60,7 +62,7 @@ export async function transcribeViaGateway(
     throw await providerResponseError(
       response,
       'asr',
-      `gateway=vercel model=${request.model} mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
+      `gateway=vercel model=${request.model} spec=4 mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
     );
   }
 
