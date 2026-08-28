@@ -19,24 +19,50 @@ export interface HttpFailure {
   retryable: boolean;
 }
 
+/** Safe, non-payload metadata parsed from a provider error response. */
+export interface ProviderFailureHint {
+  type?: string;
+  code?: string;
+  statusCode?: number;
+}
+
+function codeFor(kind: ProviderKindForErrors, suffix: string): FrameScriptErrorCode {
+  return `${kind === 'asr' ? 'ASR' : 'VISION'}_${suffix}` as FrameScriptErrorCode;
+}
+
 /**
  * Maps an HTTP status from a provider onto a FrameScript error code.
  *
- * Rate limiting gets its own code because it is the one provider failure with
- * a genuinely different user story: nothing is misconfigured, the analysis was
- * simply too fast, and the honest report is "N of M regions were transcribed".
+ * A configured credential that is rejected by an upstream service is not the
+ * same thing as missing configuration. `*_NOT_CONFIGURED` is therefore never
+ * produced here; only the server-side config readers may emit it.
+ *
+ * Vercel AI Gateway uses 403 + `no_providers_available` when a team allowlist
+ * blocks the requested model/provider, so a safe response hint lets us report
+ * that as model availability rather than authentication.
  */
-export function classifyHttpFailure(status: number, kind: ProviderKindForErrors): HttpFailure {
-  const failed: FrameScriptErrorCode =
-    kind === 'asr' ? 'ASR_PROVIDER_FAILED' : 'VISION_PROVIDER_FAILED';
-  if (status === 429) {
-    return { code: kind === 'asr' ? 'ASR_RATE_LIMITED' : failed, retryable: true };
-  }
+export function classifyHttpFailure(
+  status: number,
+  kind: ProviderKindForErrors,
+  hint: ProviderFailureHint = {},
+): HttpFailure {
+  const failed = codeFor(kind, 'PROVIDER_FAILED');
+  const normalizedType = hint.type?.trim().toLowerCase() ?? '';
+  const normalizedCode = hint.code?.trim().toLowerCase() ?? '';
+  const modelUnavailable =
+    normalizedType === 'no_providers_available' ||
+    normalizedType.includes('model_not_found') ||
+    normalizedCode.includes('model_not_found') ||
+    normalizedCode.includes('model_unavailable');
+
+  if (status === 429) return { code: codeFor(kind, 'RATE_LIMITED'), retryable: true };
+  if (modelUnavailable) return { code: codeFor(kind, 'MODEL_UNAVAILABLE'), retryable: false };
   if (status === 401 || status === 403) {
-    return {
-      code: kind === 'asr' ? 'ASR_NOT_CONFIGURED' : 'VISION_NOT_CONFIGURED',
-      retryable: false,
-    };
+    return { code: codeFor(kind, 'AUTH_FAILED'), retryable: false };
+  }
+  if (status === 404) return { code: codeFor(kind, 'MODEL_UNAVAILABLE'), retryable: false };
+  if (status === 400 || status === 409 || status === 415 || status === 422) {
+    return { code: codeFor(kind, 'BAD_REQUEST'), retryable: false };
   }
   if (status === 408 || status === 425 || status >= 500) return { code: failed, retryable: true };
   return { code: failed, retryable: false };
@@ -46,9 +72,67 @@ export function providerError(
   status: number,
   kind: ProviderKindForErrors,
   detail: string,
+  hint: ProviderFailureHint = {},
 ): FrameScriptError {
-  const { code, retryable } = classifyHttpFailure(status, kind);
+  const { code, retryable } = classifyHttpFailure(status, kind, hint);
   return new FrameScriptError({ code, detail, recoverable: retryable });
+}
+
+/**
+ * Converts a failed provider Response into a typed error while retaining only
+ * non-sensitive diagnostic fields. The raw provider body is never logged or
+ * surfaced: it could echo prompts, audio-derived text, or image-derived text.
+ */
+export async function providerResponseError(
+  response: Response,
+  kind: ProviderKindForErrors,
+  context: string,
+): Promise<FrameScriptError> {
+  const hint = await readProviderFailureHint(response);
+  const { code, retryable } = classifyHttpFailure(response.status, kind, hint);
+  const parts = [context, `upstreamStatus=${response.status}`];
+  if (hint.type) parts.push(`type=${sanitizeToken(hint.type)}`);
+  if (hint.code) parts.push(`code=${sanitizeToken(hint.code)}`);
+  if (hint.statusCode !== undefined && hint.statusCode !== response.status) {
+    parts.push(`reportedStatus=${hint.statusCode}`);
+  }
+  return new FrameScriptError({ code, detail: parts.join(' '), recoverable: retryable });
+}
+
+async function readProviderFailureHint(response: Response): Promise<ProviderFailureHint> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return {};
+  }
+  if (!body || typeof body !== 'object') return {};
+  const record = body as Record<string, unknown>;
+  const nested =
+    record.error && typeof record.error === 'object'
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+
+  const type = firstString(record.type, nested?.type);
+  const code = firstString(record.code, nested?.code);
+  const rawStatus = record.statusCode ?? nested?.statusCode;
+  const statusCode = Number(rawStatus);
+  return {
+    ...(type ? { type } : {}),
+    ...(code ? { code } : {}),
+    ...(Number.isFinite(statusCode) ? { statusCode } : {}),
+  };
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 120);
+  }
+  return undefined;
+}
+
+function sanitizeToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.:-]/g, '_').slice(0, 120);
 }
 
 export interface RetryOptions {
