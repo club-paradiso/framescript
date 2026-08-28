@@ -30,12 +30,14 @@ export default function handler(
   request: Request | IncomingMessage,
   response?: ServerResponse,
 ): Response | Promise<void> {
-  if (request instanceof Request || !response) {
+  if (request instanceof Request) {
     if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET');
     return GET(request);
   }
+  if (!response) throw new TypeError('Vercel Node response is required.');
 
   const method = (request.method ?? 'GET').toUpperCase();
-  const result = method === 'GET' || method === 'HEAD' ? json(capabilityReport()) : methodNotAllowed('GET');
+  const result =
+    method === 'GET' || method === 'HEAD' ? json(capabilityReport()) : methodNotAllowed('GET');
   return writeWebResponse(response, result);
 }
