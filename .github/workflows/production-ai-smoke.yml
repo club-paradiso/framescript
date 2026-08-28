@@ -2,16 +2,9 @@ name: Production AI smoke
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'api/**'
-      - 'src/ai/**'
-      - 'src/utils/base64.ts'
-      - 'scripts/make-fixture-media.mjs'
-      - 'scripts/production-ai-smoke.mjs'
-      - '.github/workflows/production-ai-smoke.yml'
+  repository_dispatch:
+    types:
+      - 'vercel.deployment.success'
 
 permissions:
   contents: read
@@ -23,11 +16,17 @@ concurrency:
 jobs:
   live-inference:
     name: Live production inference
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.client_payload.environment == 'production' &&
+       github.event.client_payload.project.id == 'prj_cqnqtSbdticO1lAoIA4Y9C4TaIeP')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check out repository
+      - name: Check out the deployed commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.git.sha || github.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -37,13 +36,9 @@ jobs:
       - name: Generate synthetic media fixture
         run: node scripts/make-fixture-media.mjs
 
-      - name: Let the production alias settle
-        if: github.event_name == 'push'
-        run: sleep 20
-
-      - name: Exercise production ASR and vision
+      - name: Exercise deployed ASR and vision
         env:
-          FRAMESCRIPT_SMOKE_ORIGIN: https://framescript-eta.vercel.app
+          FRAMESCRIPT_SMOKE_ORIGIN: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || 'https://framescript-eta.vercel.app' }}
           FRAMESCRIPT_SMOKE_ASR_MODEL: openai/gpt-4o-transcribe
           FRAMESCRIPT_SMOKE_VISION_MODEL: google/gemini-3.5-flash-lite
         run: node scripts/production-ai-smoke.mjs
