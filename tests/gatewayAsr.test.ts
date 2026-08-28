@@ -103,7 +103,7 @@ describe('Vercel AI Gateway vision configuration', () => {
       provider: 'vercel-ai-gateway',
       endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
       apiKey: 'request-context-token',
-      model: 'openai/gpt-5.6-luna-fast',
+      model: 'openai/gpt-5.6-luna',
     });
   });
 
