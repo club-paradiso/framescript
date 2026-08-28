@@ -13,6 +13,7 @@
  * the evidence this produces.
  */
 
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isError, readVisionConfig, LIMITS } from './_lib/config.js';
 import {
   badRequest,
@@ -22,6 +23,7 @@ import {
   methodNotAllowed,
   tooLarge,
 } from './_lib/http.js';
+import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
 import { AnthropicVisionProvider } from '../src/ai/providers/anthropic.js';
 import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision.js';
 import { fromBase64 } from '../src/utils/base64.js';
@@ -111,10 +113,26 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Kept for direct unit/E2E invocation outside Vercel. */
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
-  return POST(request);
+/** Direct tests use Web Request; Vercel uses legacy Node req/res. */
+export default function handler(request: Request): Promise<Response>;
+export default function handler(request: IncomingMessage, response: ServerResponse): Promise<void>;
+export default async function handler(
+  request: Request | IncomingMessage,
+  response?: ServerResponse,
+): Promise<Response | void> {
+  if (request instanceof Request || !response) {
+    if (request.method !== 'POST') return methodNotAllowed('POST');
+    return POST(request);
+  }
+
+  if ((request.method ?? 'GET').toUpperCase() !== 'POST') {
+    await writeWebResponse(response, methodNotAllowed('POST'));
+    return;
+  }
+
+  const webRequest = await toWebRequest(request);
+  const result = await POST(webRequest);
+  await writeWebResponse(response, result);
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -139,8 +157,6 @@ function parseFrames(
       return { error: `Unsupported frame type "${mimeType}".` };
     if (typeof raw.data !== 'string' || raw.data.length === 0)
       return { error: 'Frame data missing.' };
-    // base64 inflates by 4/3; check before decoding so a huge string is never
-    // materialized as bytes.
     if ((raw.data.length * 3) / 4 > LIMITS.maxFrameBytes)
       return { error: 'Frame exceeds the size limit.' };
 
