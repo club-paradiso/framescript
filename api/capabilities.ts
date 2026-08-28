@@ -9,8 +9,10 @@
  * key, no environment values.
  */
 
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { capabilityReport } from './_lib/config.js';
 import { json, methodNotAllowed } from './_lib/http.js';
+import { writeWebResponse } from './_lib/nodeAdapter.js';
 
 export function GET(_request: Request): Response {
   return json(capabilityReport());
@@ -18,8 +20,22 @@ export function GET(_request: Request): Response {
 
 export const HEAD = GET;
 
-/** Kept for direct unit/E2E invocation outside Vercel. */
-export default function handler(request: Request): Response {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET');
-  return GET(request);
+/**
+ * Direct tests call the one-argument Web form. Vercel calls the two-argument
+ * Node form and requires the response to be written through `res`.
+ */
+export default function handler(request: Request): Response;
+export default function handler(request: IncomingMessage, response: ServerResponse): Promise<void>;
+export default function handler(
+  request: Request | IncomingMessage,
+  response?: ServerResponse,
+): Response | Promise<void> {
+  if (request instanceof Request || !response) {
+    if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET');
+    return GET(request);
+  }
+
+  const method = (request.method ?? 'GET').toUpperCase();
+  const result = method === 'GET' || method === 'HEAD' ? json(capabilityReport()) : methodNotAllowed('GET');
+  return writeWebResponse(response, result);
 }
