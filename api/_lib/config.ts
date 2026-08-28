@@ -11,7 +11,7 @@
  */
 
 export type AsrProviderId = 'openai-compatible' | 'vercel-ai-gateway';
-export type VisionProviderId = 'anthropic' | 'openai-compatible';
+export type VisionProviderId = 'anthropic' | 'openai-compatible' | 'vercel-ai-gateway';
 
 export interface AsrConfig {
   provider: AsrProviderId;
@@ -51,6 +51,8 @@ export const LIMITS = {
 const DEFAULT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcription-model';
 const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
+const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
+const DEFAULT_GATEWAY_VISION_MODEL = 'openai/gpt-5.6-luna-fast';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const VERCEL_REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
 
@@ -78,6 +80,10 @@ function vercelRuntimeOidcToken(): string {
   return typeof token === 'string' ? token.trim() : '';
 }
 
+function gatewayCredential(): string {
+  return env('AI_GATEWAY_API_KEY') || vercelRuntimeOidcToken() || env('VERCEL_OIDC_TOKEN');
+}
+
 export function readAsrConfig(): AsrConfig | { error: string } {
   const explicitApiKey = env('FRAMESCRIPT_ASR_API_KEY');
   if (explicitApiKey) {
@@ -99,8 +105,7 @@ export function readAsrConfig(): AsrConfig | { error: string } {
   // Explicit Gateway keys remain useful outside Vercel. On Vercel, the
   // per-request context is authoritative because its OIDC token is refreshed by
   // the platform instead of being a process-lifetime snapshot.
-  const gatewayToken =
-    env('AI_GATEWAY_API_KEY') || vercelRuntimeOidcToken() || env('VERCEL_OIDC_TOKEN');
+  const gatewayToken = gatewayCredential();
   if (gatewayToken) {
     return {
       provider: 'vercel-ai-gateway',
@@ -117,22 +122,40 @@ export function readAsrConfig(): AsrConfig | { error: string } {
 }
 
 export function readVisionConfig(): VisionConfig | { error: string } {
-  const apiKey = env('FRAMESCRIPT_VISION_API_KEY');
-  if (!apiKey) return { error: 'FRAMESCRIPT_VISION_API_KEY is not set.' };
+  const explicitApiKey = env('FRAMESCRIPT_VISION_API_KEY');
+  if (explicitApiKey) {
+    const provider = (env('FRAMESCRIPT_VISION_PROVIDER') || 'anthropic') as VisionProviderId;
+    if (provider !== 'anthropic' && provider !== 'openai-compatible') {
+      return { error: `Unsupported FRAMESCRIPT_VISION_PROVIDER "${provider}".` };
+    }
+    const model = env('FRAMESCRIPT_VISION_MODEL');
+    if (!model) return { error: 'FRAMESCRIPT_VISION_MODEL is not set.' };
 
-  const provider = (env('FRAMESCRIPT_VISION_PROVIDER') || 'anthropic') as VisionProviderId;
-  if (provider !== 'anthropic' && provider !== 'openai-compatible') {
-    return { error: `Unsupported FRAMESCRIPT_VISION_PROVIDER "${provider}".` };
+    const endpoint =
+      env('FRAMESCRIPT_VISION_ENDPOINT') ||
+      (provider === 'anthropic' ? DEFAULT_ANTHROPIC_ENDPOINT : '');
+    if (!endpoint) return { error: 'FRAMESCRIPT_VISION_ENDPOINT is not set.' };
+
+    return { provider, endpoint, apiKey: explicitApiKey, model };
   }
-  const model = env('FRAMESCRIPT_VISION_MODEL');
-  if (!model) return { error: 'FRAMESCRIPT_VISION_MODEL is not set.' };
 
-  const endpoint =
-    env('FRAMESCRIPT_VISION_ENDPOINT') ||
-    (provider === 'anthropic' ? DEFAULT_ANTHROPIC_ENDPOINT : '');
-  if (!endpoint) return { error: 'FRAMESCRIPT_VISION_ENDPOINT is not set.' };
+  // Reuse the same short-lived deployment credential as transcription. The
+  // Gateway's OpenAI-compatible chat endpoint accepts image data URLs, which is
+  // exactly the wire format FrameScript's existing vision adapter already uses.
+  const gatewayToken = gatewayCredential();
+  if (gatewayToken) {
+    return {
+      provider: 'vercel-ai-gateway',
+      endpoint: DEFAULT_GATEWAY_VISION_ENDPOINT,
+      apiKey: gatewayToken,
+      model: env('FRAMESCRIPT_GATEWAY_VISION_MODEL') || DEFAULT_GATEWAY_VISION_MODEL,
+    };
+  }
 
-  return { provider, endpoint, apiKey, model };
+  return {
+    error:
+      'No vision credential is available. Set FRAMESCRIPT_VISION_API_KEY, or deploy on Vercel with AI Gateway OIDC enabled.',
+  };
 }
 
 export function isError<T>(value: T | { error: string }): value is { error: string } {
