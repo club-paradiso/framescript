@@ -9,8 +9,8 @@
  * key, no environment values.
  */
 
-import { capabilityReport } from './_lib/config';
-import { json, methodNotAllowed } from './_lib/http';
+import { capabilityReport } from './_lib/config.js';
+import { json, methodNotAllowed } from './_lib/http.js';
 
 export default function handler(request: Request): Response {
   if (request.method !== 'GET' && request.method !== 'HEAD') return methodNotAllowed('GET');
