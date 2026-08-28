@@ -13,8 +13,9 @@
  *   - `/api/analyze-frame` receives a handful of downscaled JPEG keyframes for
  *     one window the local scanner already judged significant.
  *
- * Retries are bounded and only ever applied to 429 and 5xx. A 400 or a 401 is
- * reported once, immediately, because retrying it cannot help.
+ * Retries are bounded and only ever applied to genuinely transient failures.
+ * A malformed request, rejected credential, unavailable model or invalid
+ * provider response is reported once because repeating it cannot help.
  */
 
 import {
@@ -67,14 +68,47 @@ interface ApiErrorBody {
 
 const KNOWN_CODES = new Set<string>([
   'ASR_NOT_CONFIGURED',
+  'ASR_BAD_REQUEST',
+  'ASR_AUTH_FAILED',
+  'ASR_MODEL_UNAVAILABLE',
   'ASR_PROVIDER_FAILED',
   'ASR_RATE_LIMITED',
+  'ASR_RESPONSE_INVALID',
   'VISION_NOT_CONFIGURED',
+  'VISION_BAD_REQUEST',
+  'VISION_AUTH_FAILED',
+  'VISION_MODEL_UNAVAILABLE',
   'VISION_PROVIDER_FAILED',
+  'VISION_RATE_LIMITED',
+  'VISION_RESPONSE_INVALID',
   'AI_RESPONSE_INVALID',
   'MESSAGE_INVALID',
   'ANALYSIS_ABORTED',
 ]);
+
+const NON_RETRYABLE_CODES = new Set<FrameScriptErrorCode>([
+  'ASR_NOT_CONFIGURED',
+  'ASR_BAD_REQUEST',
+  'ASR_AUTH_FAILED',
+  'ASR_MODEL_UNAVAILABLE',
+  'ASR_RESPONSE_INVALID',
+  'VISION_NOT_CONFIGURED',
+  'VISION_BAD_REQUEST',
+  'VISION_AUTH_FAILED',
+  'VISION_MODEL_UNAVAILABLE',
+  'VISION_RESPONSE_INVALID',
+  'AI_RESPONSE_INVALID',
+  'MESSAGE_INVALID',
+]);
+
+/**
+ * A run shares one AbortSignal across its bounded workers. WeakMaps make that
+ * signal a natural circuit-breaker key without introducing global run ids or
+ * keeping completed analyses alive. At most the requests that were already in
+ * flight when a deterministic failure arrived can still reach the server.
+ */
+const asrRunCircuits = new WeakMap<AbortSignal, FrameScriptError>();
+const visionRunCircuits = new WeakMap<AbortSignal, FrameScriptError>();
 
 /**
  * Turns a failed response into a typed error.
@@ -93,16 +127,33 @@ async function toError(response: Response, kind: 'asr' | 'vision'): Promise<Fram
   const classified = classifyHttpFailure(response.status, kind);
   const code: FrameScriptErrorCode =
     body.code && KNOWN_CODES.has(body.code) ? (body.code as FrameScriptErrorCode) : classified.code;
-  // A missing configuration is never retried: it will still be missing.
-  const recoverable =
-    code === 'ASR_NOT_CONFIGURED' || code === 'VISION_NOT_CONFIGURED'
-      ? false
+  const recoverable = NON_RETRYABLE_CODES.has(code)
+    ? false
+    : code === 'ASR_RATE_LIMITED' || code === 'VISION_RATE_LIMITED'
+      ? true
       : classified.retryable;
   return new FrameScriptError({
     code,
     detail: `${response.status} ${body.message ?? response.statusText}`.slice(0, 200),
     recoverable,
   });
+}
+
+function existingCircuit(
+  signal: AbortSignal | undefined,
+  circuits: WeakMap<AbortSignal, FrameScriptError>,
+): FrameScriptError | undefined {
+  return signal ? circuits.get(signal) : undefined;
+}
+
+function rememberDeterministicFailure(
+  signal: AbortSignal | undefined,
+  circuits: WeakMap<AbortSignal, FrameScriptError>,
+  error: unknown,
+): void {
+  if (signal && FrameScriptError.is(error) && !error.recoverable && !isAbort(error)) {
+    circuits.set(signal, error);
+  }
 }
 
 export async function fetchCapabilities(signal?: AbortSignal): Promise<Capabilities> {
@@ -141,54 +192,62 @@ export interface TranscribeWindowRequest {
 export async function transcribeWindow(
   request: TranscribeWindowRequest,
 ): Promise<AsrResult | null> {
-  return withRetry(
-    async () => {
-      const form = new FormData();
-      const buffer = new ArrayBuffer(request.wav.byteLength);
-      new Uint8Array(buffer).set(request.wav);
-      form.append('audio', new Blob([buffer], { type: 'audio/wav' }), 'window.wav');
-      form.append('startMs', String(Math.round(request.start)));
-      form.append('endMs', String(Math.round(request.end)));
-      if (request.languageHint) form.append('language', request.languageHint);
+  const openCircuit = existingCircuit(request.signal, asrRunCircuits);
+  if (openCircuit) throw openCircuit;
 
-      const response = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: form,
-        ...(request.signal ? { signal: request.signal } : {}),
-      });
-      if (!response.ok) throw await toError(response, 'asr');
+  try {
+    return await withRetry(
+      async () => {
+        const form = new FormData();
+        const buffer = new ArrayBuffer(request.wav.byteLength);
+        new Uint8Array(buffer).set(request.wav);
+        form.append('audio', new Blob([buffer], { type: 'audio/wav' }), 'window.wav');
+        form.append('startMs', String(Math.round(request.start)));
+        form.append('endMs', String(Math.round(request.end)));
+        if (request.languageHint) form.append('language', request.languageHint);
 
-      const body = (await response.json()) as {
-        text?: unknown;
-        language?: unknown;
-        segments?: unknown;
-      };
-      const text = typeof body.text === 'string' ? body.text.trim() : '';
-      const segments = Array.isArray(body.segments)
-        ? body.segments
-            .map((raw) => raw as { startMs?: unknown; endMs?: unknown; text?: unknown })
-            .filter(
-              (raw) =>
-                typeof raw.text === 'string' &&
-                raw.text.trim().length > 0 &&
-                Number.isFinite(Number(raw.startMs)) &&
-                Number.isFinite(Number(raw.endMs)),
-            )
-            .map((raw) => ({
-              startMs: Number(raw.startMs),
-              endMs: Number(raw.endMs),
-              text: (raw.text as string).trim(),
-            }))
-        : [];
-      if (!text && segments.length === 0) return null;
-      return {
-        text: text || segments.map((segment) => segment.text).join(' '),
-        ...(typeof body.language === 'string' && body.language ? { language: body.language } : {}),
-        ...(segments.length > 0 ? { segments } : {}),
-      };
-    },
-    { attempts: 3, ...(request.signal ? { signal: request.signal } : {}) },
-  );
+        const response = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: form,
+          ...(request.signal ? { signal: request.signal } : {}),
+        });
+        if (!response.ok) throw await toError(response, 'asr');
+
+        const body = (await response.json()) as {
+          text?: unknown;
+          language?: unknown;
+          segments?: unknown;
+        };
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        const segments = Array.isArray(body.segments)
+          ? body.segments
+              .map((raw) => raw as { startMs?: unknown; endMs?: unknown; text?: unknown })
+              .filter(
+                (raw) =>
+                  typeof raw.text === 'string' &&
+                  raw.text.trim().length > 0 &&
+                  Number.isFinite(Number(raw.startMs)) &&
+                  Number.isFinite(Number(raw.endMs)),
+              )
+              .map((raw) => ({
+                startMs: Number(raw.startMs),
+                endMs: Number(raw.endMs),
+                text: (raw.text as string).trim(),
+              }))
+          : [];
+        if (!text && segments.length === 0) return null;
+        return {
+          text: text || segments.map((segment) => segment.text).join(' '),
+          ...(typeof body.language === 'string' && body.language ? { language: body.language } : {}),
+          ...(segments.length > 0 ? { segments } : {}),
+        };
+      },
+      { attempts: 3, ...(request.signal ? { signal: request.signal } : {}) },
+    );
+  } catch (error) {
+    rememberDeterministicFailure(request.signal, asrRunCircuits, error);
+    throw error;
+  }
 }
 
 export interface AnalyzeFramesRequest {
@@ -205,44 +264,52 @@ export interface AnalyzeFramesRequest {
 export async function analyzeFrames(
   request: AnalyzeFramesRequest,
 ): Promise<VisionWindowAnalysis | null> {
-  return withRetry(
-    async () => {
-      const response = await fetch('/api/analyze-frame', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          start: Math.round(request.start),
-          end: Math.round(request.end),
-          frames: request.frames.map((frame) => ({
-            timestamp: Math.round(frame.timestamp),
-            data: frame.base64,
-            mimeType: frame.mimeType,
-            width: frame.width,
-            height: frame.height,
-          })),
-          dialogue: request.dialogue,
-          soundEvents: request.soundEvents,
-          ...(request.requestOcr ? { requestOcr: true } : {}),
-        }),
-        ...(request.signal ? { signal: request.signal } : {}),
-      });
-      if (!response.ok) throw await toError(response, 'vision');
+  const openCircuit = existingCircuit(request.signal, visionRunCircuits);
+  if (openCircuit) throw openCircuit;
 
-      const body = (await response.json()) as { analysis?: unknown };
-      if (!body.analysis) return null;
-      // Validated a second time in the browser. The server already validated,
-      // but the page must not render anything it has not checked itself.
-      const analysis = validateVisionAnalysis(body.analysis);
-      if (!analysis) {
-        throw new FrameScriptError({
-          code: 'AI_RESPONSE_INVALID',
-          detail: 'vision response failed client-side validation',
+  try {
+    return await withRetry(
+      async () => {
+        const response = await fetch('/api/analyze-frame', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            start: Math.round(request.start),
+            end: Math.round(request.end),
+            frames: request.frames.map((frame) => ({
+              timestamp: Math.round(frame.timestamp),
+              data: frame.base64,
+              mimeType: frame.mimeType,
+              width: frame.width,
+              height: frame.height,
+            })),
+            dialogue: request.dialogue,
+            soundEvents: request.soundEvents,
+            ...(request.requestOcr ? { requestOcr: true } : {}),
+          }),
+          ...(request.signal ? { signal: request.signal } : {}),
         });
-      }
-      return analysis;
-    },
-    { attempts: 2, ...(request.signal ? { signal: request.signal } : {}) },
-  );
+        if (!response.ok) throw await toError(response, 'vision');
+
+        const body = (await response.json()) as { analysis?: unknown };
+        if (!body.analysis) return null;
+        // Validated a second time in the browser. The server already validated,
+        // but the page must not render anything it has not checked itself.
+        const analysis = validateVisionAnalysis(body.analysis);
+        if (!analysis) {
+          throw new FrameScriptError({
+            code: 'VISION_RESPONSE_INVALID',
+            detail: 'vision response failed client-side validation',
+          });
+        }
+        return analysis;
+      },
+      { attempts: 2, ...(request.signal ? { signal: request.signal } : {}) },
+    );
+  } catch (error) {
+    rememberDeterministicFailure(request.signal, visionRunCircuits, error);
+    throw error;
+  }
 }
 
 /**

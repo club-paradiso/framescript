@@ -32,10 +32,19 @@ export type FrameScriptErrorCode =
   | 'SCREENPLAY_BUILD_FAILED'
   // --- Remote evidence acquisition -------------------------------------------
   | 'ASR_NOT_CONFIGURED'
+  | 'ASR_BAD_REQUEST'
+  | 'ASR_AUTH_FAILED'
+  | 'ASR_MODEL_UNAVAILABLE'
   | 'ASR_PROVIDER_FAILED'
   | 'ASR_RATE_LIMITED'
+  | 'ASR_RESPONSE_INVALID'
   | 'VISION_NOT_CONFIGURED'
+  | 'VISION_BAD_REQUEST'
+  | 'VISION_AUTH_FAILED'
+  | 'VISION_MODEL_UNAVAILABLE'
   | 'VISION_PROVIDER_FAILED'
+  | 'VISION_RATE_LIMITED'
+  | 'VISION_RESPONSE_INVALID'
   | 'NETWORK_FAILED'
   | 'PLATFORM_UPDATED'
   | 'PERMISSION_DENIED'
@@ -109,9 +118,9 @@ const USER_MESSAGES: Record<FrameScriptErrorCode, string> = {
   AUDIO_DECODE_FAILED:
     'The audio track started decoding and then failed. Picture analysis can continue without it.',
   VIDEO_METADATA_FAILED:
-    'The browser could not read this file\u2019s video metadata, so duration and dimensions are unknown.',
+    'The browser could not read this file’s video metadata, so duration and dimensions are unknown.',
   VIDEO_CODEC_UNSUPPORTED:
-    'Your browser cannot decode this file\u2019s video track. Audio analysis can still run.',
+    'Your browser cannot decode this file’s video track. Audio analysis can still run.',
   VIDEO_PLAYBACK_FAILED:
     'The picture scan needs the file to play locally, and playback did not start. Audio analysis is unaffected.',
   CANVAS_READBACK_FAILED:
@@ -123,14 +132,32 @@ const USER_MESSAGES: Record<FrameScriptErrorCode, string> = {
     'FrameScript collected evidence but could not assemble it into a screenplay. The evidence is still listed.',
   ASR_NOT_CONFIGURED:
     'Speech was detected, but transcription is not configured, so no dialogue can be written from the audio. Structural analysis continues without it.',
+  ASR_BAD_REQUEST:
+    'The transcription service rejected the speech request format. Local speech, speaker and sound analysis was preserved.',
+  ASR_AUTH_FAILED:
+    'The transcription service rejected FrameScript’s authentication. Local speech, speaker and sound analysis was preserved.',
+  ASR_MODEL_UNAVAILABLE:
+    'The configured transcription model is unavailable to this deployment. Local speech, speaker and sound analysis was preserved.',
   ASR_PROVIDER_FAILED:
     'The transcription service could not complete this request, so some detected speech has no text. Everything else was kept.',
   ASR_RATE_LIMITED:
     'The transcription service is rate limiting this analysis. Some detected speech was left untranscribed rather than retried indefinitely.',
+  ASR_RESPONSE_INVALID:
+    'The transcription service returned a response FrameScript could not verify, so it was discarded rather than guessed at.',
   VISION_NOT_CONFIGURED:
     'Scene understanding is not configured, so the picture is described by motion and scene changes only.',
+  VISION_BAD_REQUEST:
+    'The scene-understanding service rejected the selected-frame request format. Local motion and scene-change evidence was preserved.',
+  VISION_AUTH_FAILED:
+    'The scene-understanding service rejected FrameScript’s authentication. Local motion and scene-change evidence was preserved.',
+  VISION_MODEL_UNAVAILABLE:
+    'The configured scene-understanding model or provider is unavailable to this deployment. Local motion and scene-change evidence was preserved.',
   VISION_PROVIDER_FAILED:
     'The scene-understanding service could not complete this request. Local picture evidence was kept.',
+  VISION_RATE_LIMITED:
+    'The scene-understanding service is rate limiting this analysis. Some selected scenes were left without semantic descriptions.',
+  VISION_RESPONSE_INVALID:
+    'The scene-understanding service returned a response FrameScript could not verify, so it was discarded rather than guessed at.',
   NETWORK_FAILED:
     'FrameScript could not reach its own analysis endpoint. Local, on-device analysis is unaffected.',
   PLATFORM_UPDATED:

@@ -1,6 +1,6 @@
 import type { AsrResult, AsrSegment } from '../../src/ai/types.js';
 import { normalizeAsrLanguage } from '../../src/ai/providers/openaiCompatible.js';
-import { providerError } from '../../src/ai/retry.js';
+import { providerResponseError } from '../../src/ai/retry.js';
 import { FrameScriptError } from '../../src/utils/errors.js';
 import { toBase64 } from '../../src/utils/base64.js';
 
@@ -33,10 +33,11 @@ export interface GatewayTranscribeRequest {
 /**
  * Sends one already-bounded WAV speech window through Vercel AI Gateway.
  *
- * Vercel's transcription endpoint uses JSON/base64 rather than OpenAI's
- * multipart `/audio/transcriptions` wire format. Authentication can be the
- * deployment's short-lived OIDC token, so production does not need a long-lived
- * OpenAI credential just to turn detected speech into text.
+ * This mirrors the current `@ai-sdk/gateway` v4 transcription transport:
+ * model id + transcription specification version headers, and a JSON body with
+ * base64 audio plus its media type. Keeping the wire contract aligned with the
+ * official provider matters because the v4 endpoint rejects an incomplete
+ * model envelope before it ever reaches the upstream ASR provider.
  */
 export async function transcribeViaGateway(
   request: GatewayTranscribeRequest,
@@ -47,6 +48,7 @@ export async function transcribeViaGateway(
     headers: {
       authorization: `Bearer ${request.token}`,
       'content-type': 'application/json',
+      'ai-transcription-model-specification-version': '4',
       'ai-model-id': request.model,
     },
     body: JSON.stringify({
@@ -57,10 +59,10 @@ export async function transcribeViaGateway(
   });
 
   if (!response.ok) {
-    throw providerError(
-      response.status,
+    throw await providerResponseError(
+      response,
       'asr',
-      `Vercel AI Gateway transcription returned ${response.status}`,
+      `gateway=vercel model=${request.model} spec=4 mediaType=audio/wav wavBytes=${request.wav.byteLength}`,
     );
   }
 
@@ -69,8 +71,8 @@ export async function transcribeViaGateway(
     body = (await response.json()) as GatewayTranscriptionResponse;
   } catch {
     throw new FrameScriptError({
-      code: 'AI_RESPONSE_INVALID',
-      detail: 'Vercel AI Gateway transcription response was not JSON',
+      code: 'ASR_RESPONSE_INVALID',
+      detail: `gateway=vercel model=${request.model} response=non-json`,
     });
   }
 
@@ -98,7 +100,12 @@ function normalizeGatewaySegments(raw: unknown): AsrSegment[] {
 
     const startSeconds = finite(segment.startSecond) ?? finite(segment.start);
     const endSeconds = finite(segment.endSecond) ?? finite(segment.end);
-    if (startSeconds === null || endSeconds === null || startSeconds < 0 || endSeconds < startSeconds) {
+    if (
+      startSeconds === null ||
+      endSeconds === null ||
+      startSeconds < 0 ||
+      endSeconds < startSeconds
+    ) {
       continue;
     }
     result.push({

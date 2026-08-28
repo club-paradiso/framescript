@@ -47,26 +47,40 @@ export function badRequest(detail: string): Response {
 /**
  * Turns anything thrown inside a route into a safe response.
  *
- * The status is chosen from the code so the browser's retry policy — which only
- * retries 429 and 5xx — lines up with what the failure actually was.
+ * Provider failures are dependencies failing behind FrameScript, so deterministic
+ * upstream request/auth/response failures are represented as 502 rather than a
+ * misleading FrameScript 500. The browser still uses the typed body code to
+ * decide whether retrying can help.
  */
 export function errorResponse(error: unknown): Response {
   if (isAbort(error)) return json({ code: 'ANALYSIS_ABORTED', message: 'Request cancelled.' }, 499);
 
   const { code, message } = describeError(error);
-  const status =
-    code === 'ASR_RATE_LIMITED'
-      ? 429
-      : code === 'ASR_NOT_CONFIGURED' || code === 'VISION_NOT_CONFIGURED'
-        ? 503
-        : code === 'AI_RESPONSE_INVALID'
-          ? 502
-          : FrameScriptError.is(error) && error.recoverable
-            ? 502
-            : 500;
+  const rateLimited = code === 'ASR_RATE_LIMITED' || code === 'VISION_RATE_LIMITED';
+  const notConfigured = code === 'ASR_NOT_CONFIGURED' || code === 'VISION_NOT_CONFIGURED';
+  const modelUnavailable =
+    code === 'ASR_MODEL_UNAVAILABLE' || code === 'VISION_MODEL_UNAVAILABLE';
+  const dependencyFailure =
+    code === 'ASR_BAD_REQUEST' ||
+    code === 'ASR_AUTH_FAILED' ||
+    code === 'ASR_PROVIDER_FAILED' ||
+    code === 'ASR_RESPONSE_INVALID' ||
+    code === 'VISION_BAD_REQUEST' ||
+    code === 'VISION_AUTH_FAILED' ||
+    code === 'VISION_PROVIDER_FAILED' ||
+    code === 'VISION_RESPONSE_INVALID' ||
+    code === 'AI_RESPONSE_INVALID';
 
-  // Logged server-side only. `errorDetail` never includes a key: the providers
-  // construct their detail strings from the status code alone.
+  const status = rateLimited
+    ? 429
+    : notConfigured || modelUnavailable
+      ? 503
+      : dependencyFailure || (FrameScriptError.is(error) && error.recoverable)
+        ? 502
+        : 500;
+
+  // Logged server-side only. Provider adapters deliberately include only safe
+  // status/type/code/model/size metadata, never provider bodies, auth, or media.
   console.error('[framescript-api]', code, errorDetail(error));
   return json({ code, message }, status);
 }
