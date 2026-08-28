@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHttpFailure, providerResponseError } from '@/core';
+import { classifyHttpFailure } from '@/core';
+import { providerResponseError } from '../src/ai/retry';
 
 describe('provider failure classification', () => {
   it('does not confuse configured-but-rejected credentials with missing configuration', () => {
