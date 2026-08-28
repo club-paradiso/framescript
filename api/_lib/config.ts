@@ -52,7 +52,11 @@ const DEFAULT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcription-model';
 const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
-const DEFAULT_GATEWAY_VISION_MODEL = 'openai/gpt-5.6-luna';
+// GPT-5.6 Luna is still limited-preview and returned 403 for this deployment in
+// production. Gemini 3.5 Flash Lite is a generally routable multimodal model
+// with both Google and Vertex endpoints, so it is the safer default. Operators
+// can still opt into Luna (or any later model) through the environment override.
+const DEFAULT_GATEWAY_VISION_MODEL = 'google/gemini-3.5-flash-lite';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const VERCEL_REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
 
