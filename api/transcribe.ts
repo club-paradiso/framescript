@@ -113,10 +113,11 @@ export default async function handler(
   request: Request | IncomingMessage,
   response?: ServerResponse,
 ): Promise<Response | void> {
-  if (request instanceof Request || !response) {
+  if (request instanceof Request) {
     if (request.method !== 'POST') return methodNotAllowed('POST');
     return POST(request);
   }
+  if (!response) throw new TypeError('Vercel Node response is required.');
 
   if ((request.method ?? 'GET').toUpperCase() !== 'POST') {
     await writeWebResponse(response, methodNotAllowed('POST'));
