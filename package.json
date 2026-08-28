@@ -9,7 +9,7 @@
     "dev": "node scripts/build.mjs --watch",
     "build": "node scripts/generate-icons.mjs && node scripts/build.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.tests.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.api.json && tsc --noEmit -p tsconfig.tests.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"web/**/*.{ts,tsx,css,html,json,webmanifest}\" \"*.{json,md}\"",

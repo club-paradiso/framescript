@@ -198,6 +198,38 @@ export type {
   ProjectSourceSummary,
 } from '../storage/projectFormat';
 
+// --- AI evidence acquisition ---------------------------------------------------
+//
+// The engine never asks a model for a screenplay. These are the pieces that let
+// a provider contribute *evidence*, which the deterministic pipeline above then
+// assembles exactly as it assembles a subtitle file.
+export { planSpeechWindows, sliceWindow } from '../ai/speechWindows';
+export type { SpeechWindow, SpeechWindowOptions, SpeechWindowPlan } from '../ai/speechWindows';
+export {
+  speakerForRange,
+  transcriptToEvidence,
+  visionAnalysisToEvidence,
+} from '../ai/evidenceMapping';
+export type { TranscriptMappingOptions, VisionMappingOptions } from '../ai/evidenceMapping';
+export {
+  classifyHttpFailure,
+  isAbort,
+  isTransientNetworkError,
+  providerError,
+  retryDelayMs,
+  withRetry,
+} from '../ai/retry';
+export type { HttpFailure, RetryOptions } from '../ai/retry';
+export {
+  DEFAULT_ASR_MAX_WINDOW_MS,
+  DEFAULT_ASR_SAMPLE_RATE,
+  encodeAsrWindow,
+  transcribeWav,
+} from '../ai/providers/openaiCompatible';
+export type { AsrResult, AsrSegment, VisionWindowAnalysis, VisionFrame } from '../ai/types';
+export { validateVisionAnalysis } from '../ai/schemas/visionWindow';
+export { toBase64, fromBase64 } from '../utils/base64';
+
 // --- Utilities -----------------------------------------------------------------
 export { createIdFactory, hash32, shortHash } from '../utils/id';
 export {

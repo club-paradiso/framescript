@@ -6,6 +6,7 @@
   "include": [
     "web/src",
     "src/core",
+    "src/ai",
     "src/evidence",
     "src/scenes",
     "src/screenplay",

@@ -133,6 +133,11 @@ hesitation is the point.
 Forensic keeps denser evidence and allows denser analysis of important windows.
 It does not upload the film frame by frame; nothing does.
 
+Local observation fidelity and remote analysis depth are **separate settings**.
+Choosing Forensic makes the browser look more closely; it does not send more to a
+provider. In Studio the remote budget is its own control, capped per file, and
+the panel states the maximum number of requests before you start.
+
 ---
 
 ## Installation
@@ -207,25 +212,45 @@ because mocking Chrome well enough to cover them would test the mock.
 
 ## AI and BYOK
 
-FrameScript runs locally by default and makes **no network requests at all** in
-its shipped configuration.
+FrameScript runs locally by default. The extension makes **no network requests at
+all** in its shipped configuration, and Web Studio makes none for subtitle,
+project or purely structural media work.
 
-Deep scene understanding — describing what is happening in the picture — needs a
-capable multimodal model. That is opt-in, uses your own key, and requires two
-separate actions in Settings → AI: acknowledging a notice that enumerates exactly
-what would be sent, then enabling the feature.
+Two things genuinely cannot be computed on device: turning speech into words, and
+turning a picture into a description. Everything else — speech detection, speaker
+clustering, sound, silence, motion, scene boundaries, scene construction, the
+screenplay itself — is local, and stays local.
 
-| Capability          | Local default                        | Optional provider              |
-| ------------------- | ------------------------------------ | ------------------------------ |
-| Scene understanding | Motion/change analysis only          | Anthropic (your key)           |
-| Speech recognition  | _Unavailable_ — see below            | Any OpenAI-compatible endpoint |
-| On-screen text      | Region detection, no reading         | Via the vision provider        |
-| Sound events        | Onset detection, conservative labels | —                              |
-| Speaker clustering  | Local, always                        | —                              |
-| Translation         | Unavailable                          | Anthropic (your key)           |
+The two surfaces reach a model differently, on purpose:
 
-Keys live in `chrome.storage.local` — not `sync`, so the browser does not
-replicate them to your other machines.
+- **The extension** is opt-in with your own key, and requires two separate
+  actions in Settings → AI: acknowledging a notice that enumerates exactly what
+  would be sent, then enabling the feature.
+- **Web Studio** never holds a key. It posts to its own origin — `/api/transcribe`
+  and `/api/analyze-frame` — and the deployment holds the provider credential
+  server-side. Studio asks `/api/capabilities` before analysis and shows
+  "Ready" or "Not configured" for each one rather than assuming. See
+  [Web Studio](docs/WEB_STUDIO.md) for the environment variables and the exact
+  payloads.
+
+| Capability          | Local default                        | Optional provider                       |
+| ------------------- | ------------------------------------ | --------------------------------------- |
+| Scene understanding | Motion/change analysis only          | Anthropic or an OpenAI-compatible model |
+| Speech recognition  | _Unavailable_ — see below            | Any OpenAI-compatible endpoint          |
+| On-screen text      | Region detection, no reading         | Via the vision provider                 |
+| Sound events        | Onset detection, conservative labels | —                                       |
+| Speaker clustering  | Local, always                        | —                                       |
+| Translation         | Unavailable                          | Anthropic (your key)                    |
+
+Whatever a model returns becomes **evidence**, never prose. It is validated
+against a schema, clamped into the window it was shown, marked `inferred`, and
+then goes through exactly the same timeline, fusion and scene construction as a
+subtitle file. There is no path where a model writes a screenplay.
+
+Extension keys live in `chrome.storage.local` — not `sync`, so the browser does
+not replicate them to your other machines. Studio keys live in the deployment's
+server environment and are never sent to the browser; a regression test asserts
+the built client bundle contains no key, endpoint or provider auth header.
 
 Without a provider you still get: dialogue from subtitles, speaker clustering and
 turn detection, sound and silence events, scene boundaries, timing, coverage, all
@@ -257,8 +282,11 @@ Summarized here, detailed in [Platform limitations](docs/PLATFORM_LIMITATIONS.md
   frames to canvas readback. Detected and reported, not worked around.
 - **Netflix quality cannot be changed.** Only reported, honestly.
 - **No local speech recognition.** Chrome's `SpeechRecognition` cannot consume a
-  captured tab stream, and no shipped browser API transcribes tab audio locally.
-  Dialogue comes from subtitles unless you configure a provider.
+  captured tab stream, and no shipped browser API transcribes audio locally.
+  Dialogue comes from subtitles unless a provider is configured — in Studio that
+  is a deployment setting, in the extension it is your own key. Without one,
+  FrameScript reports the detected speech and says plainly that it cannot write
+  the words.
 - **Local vision measures change, not meaning.** Without a provider it can say
   "the shot changes", not who moved.
 - **On-screen text is detected, not read**, without a provider.

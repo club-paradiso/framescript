@@ -282,16 +282,19 @@ function deriveSetting(events: readonly EvidenceEvent[]): SceneSetting | undefin
 
   const best = settingEvents.reduce((a, b) => (rank(b.confidence) > rank(a.confidence) ? b : a));
   const description = best.payload.description!;
+  const interiorExterior = parseInteriorExterior(description);
+  const timeOfDay = parseTimeOfDay(description);
 
   const setting: SceneSetting = {
-    description,
+    // The place only. A source that wrote "INT a small kitchen NIGHT" has its
+    // markers parsed out below, and leaving them in the place text too would
+    // render "INT. INT A SMALL KITCHEN NIGHT - NIGHT".
+    description: stripSettingMarkers(description) || description,
     confidence: minConfidence(best.confidence, 'medium'),
     inferred: best.payload.inferred ?? true,
   };
 
-  const interiorExterior = parseInteriorExterior(description);
   if (interiorExterior) setting.interiorExterior = interiorExterior;
-  const timeOfDay = parseTimeOfDay(description);
   if (timeOfDay) setting.timeOfDay = timeOfDay;
   // Keeps the provenance chain intact even though it is not stored on the setting.
   void provenanceFrom(settingEvents);
@@ -306,6 +309,25 @@ function parseInteriorExterior(description: string): 'INT' | 'EXT' | 'UNKNOWN' |
   if (/\b(int\.?|interior|indoors?|inside)\b/i.test(description)) return 'INT';
   if (/\b(ext\.?|exterior|outdoors?|outside|street|park|forest|beach)\b/i.test(description)) return 'EXT';
   return undefined;
+}
+
+/**
+ * Removes heading markers from a setting description.
+ *
+ * Only at the edges: a "night market" is a place, not a time, so a token is
+ * dropped only when it leads or trails the description rather than wherever it
+ * appears.
+ */
+function stripSettingMarkers(description: string): string {
+  return description
+    .trim()
+    .replace(/^(int|ext|interior|exterior)\.?[\s,:-]+/i, '')
+    .replace(
+      /[\s,-]+(day|night|dawn|dusk|morning|afternoon|evening|sunset|sunrise)\.?$/i,
+      '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parseTimeOfDay(description: string): string | undefined {

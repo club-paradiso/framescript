@@ -157,6 +157,11 @@ export function fuseWindow(window: EvidenceWindow, context: FusionContext): Fusi
       beats.push(beat);
       continue;
     }
+    // A setting observation is the scene's heading, derived by the builder from
+    // all of the scene's evidence at once. Writing it as an action beat as well
+    // would print the location twice: once above the scene and once inside it.
+    if (visual.payload.kind === 'setting') continue;
+
     const description = visual.payload.description;
     if (!description) continue;
     if (!context.includeLowConfidence && visual.confidence === 'low' && visual.payload.inferred) continue;

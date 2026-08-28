@@ -11,7 +11,7 @@
 
 import { createIdFactory } from '../utils/id';
 import { errorDetail, FrameScriptError } from '../utils/errors';
-import type { EvidenceEvent, EvidenceSourceStatus, OcrEvidence, VisualEvidence } from '../evidence/types';
+import type { EvidenceEvent, EvidenceSourceStatus } from '../evidence/types';
 import { profileFor, type AnalysisFidelity } from '../temporal/fidelity';
 import { onRuntimeMessage, sendRuntime } from '../messaging/bus';
 import type { WorkerToOffscreen } from '../messaging/protocol';
@@ -21,12 +21,12 @@ import { VideoPipeline } from './videoPipeline';
 import { settingsStore } from '../settings/store';
 import type { FrameScriptSettings } from '../settings/types';
 import { InferenceCoordinator } from '../ai/coordinator';
+import { visionAnalysisToEvidence } from '../ai/evidenceMapping';
 import { LocalHeuristicVisionProvider } from '../ai/providers/local';
 import { AnthropicVisionProvider } from '../ai/providers/anthropic';
 import { OpenAiCompatibleAsrProvider } from '../ai/providers/openaiCompatible';
 import type { SpeechRecognitionProvider, VisionAnalysisProvider, VisionFrame } from '../ai/types';
 import type { DeepAnalysisRequest } from '../temporal/TemporalScanner';
-import { fromScore } from '../evidence/confidence';
 
 const nextId = createIdFactory('deep');
 
@@ -315,58 +315,13 @@ class OffscreenController {
     );
     if (!analysis) return;
 
-    const events: EvidenceEvent[] = [];
-
-    for (const action of analysis.actions) {
-      const event: VisualEvidence = {
-        id: nextId(),
-        source: 'video',
-        start: start + Math.min(Math.max(0, action.offsetMs), Math.max(0, end - start)),
-        end,
-        confidence: action.confidence,
-        provisional: false,
-        payload: {
-          kind: 'action',
-          description: action.description,
-          metrics: request.metrics,
-          // Everything a model produced is marked inferred, so provenance can
-          // distinguish "we measured this" from "a model said this".
-          inferred: true,
-          ...(action.participants.length > 0 ? { participantIds: action.participants } : {}),
-        },
-      };
-      events.push(event);
-    }
-
-    for (const setting of analysis.settingChanges) {
-      const event: VisualEvidence = {
-        id: nextId(),
-        source: 'video',
-        start,
-        confidence: setting.confidence,
-        provisional: false,
-        payload: {
-          kind: 'setting',
-          description: [setting.interiorExterior, setting.description, setting.timeOfDay]
-            .filter(Boolean)
-            .join(' '),
-          inferred: true,
-        },
-      };
-      events.push(event);
-    }
-
-    for (const text of analysis.text) {
-      const event: OcrEvidence = {
-        id: nextId(),
-        source: 'ocr',
-        start: start + Math.max(0, text.offsetMs),
-        confidence: fromScore(request.importance),
-        provisional: false,
-        payload: { text: text.text },
-      };
-      events.push(event);
-    }
+    // Mapping lives in `src/ai/evidenceMapping.ts` so the extension and Web
+    // Studio turn provider output into evidence the same way.
+    const events = visionAnalysisToEvidence(analysis, { start, end }, {
+      ...(request.metrics ? { metrics: request.metrics } : {}),
+      importance: request.importance,
+      idFactory: nextId,
+    });
 
     if (events.length > 0) this.#batcher.push(events);
   }

@@ -44,11 +44,26 @@ export interface AsrRequest {
   signal?: AbortSignal;
 }
 
+/** One timestamped piece of a transcription, relative to the window start. */
+export interface AsrSegment {
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
 export interface AsrResult {
   text: string;
   language?: string;
   /** Only set when the provider supplies a calibrated score. */
   providerScore?: number;
+  /**
+   * Segment timings when the provider reports them.
+   *
+   * Without these a 20-second window becomes one very long line that aligns
+   * badly against subtitles and reads worse in the script, so they are
+   * requested wherever the endpoint supports it and used when present.
+   */
+  segments?: AsrSegment[];
 }
 
 export interface SpeechRecognitionProvider extends BaseProvider {

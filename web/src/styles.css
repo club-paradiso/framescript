@@ -1085,6 +1085,78 @@ ul {
   gap: 8px;
   align-items: center;
 }
+.button--ghost {
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+/* Capability readout: what this deployment can actually do, before it runs. */
+.capabilities {
+  display: grid;
+  gap: 3px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--fs-border);
+  background: var(--fs-surface-raised, transparent);
+  font-size: 0.72rem;
+}
+.capability {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.capability dt {
+  color: var(--fs-text-muted);
+}
+.capability dd {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fs-font-mono);
+  font-size: 0.68rem;
+}
+.capability--muted dd {
+  color: var(--fs-text-muted);
+}
+
+.analysis-summary {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--fs-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.analysis-summary ul {
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  color: var(--fs-text-muted);
+}
+.analysis-summary li::before {
+  content: '· ';
+}
+.analysis-notices li {
+  color: var(--fs-warn);
+}
+.check em {
+  display: block;
+  font-style: normal;
+}
+
+.privacy-footnote {
+  max-width: 62ch;
+  margin-top: 10px;
+  color: var(--fs-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
 .analyzer__video {
   width: 100%;
   max-height: 170px;
