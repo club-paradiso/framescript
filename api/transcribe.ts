@@ -16,6 +16,7 @@
  * Nothing is stored. The window exists for the duration of one request.
  */
 
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isError, readAsrConfig, LIMITS } from './_lib/config.js';
 import {
   badRequest,
@@ -25,6 +26,7 @@ import {
   methodNotAllowed,
   tooLarge,
 } from './_lib/http.js';
+import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
 import { transcribeWav } from '../src/ai/providers/openaiCompatible.js';
 import { FrameScriptError } from '../src/utils/errors.js';
 
@@ -39,8 +41,6 @@ export async function POST(request: Request): Promise<Response> {
 
   const asr = readAsrConfig();
   if (isError(asr)) {
-    // A precise, non-secret configuration status. The client turns this into
-    // "Speech was detected, but transcription is not configured."
     return json({ code: 'ASR_NOT_CONFIGURED', message: asr.error }, 503);
   }
 
@@ -82,8 +82,6 @@ export async function POST(request: Request): Promise<Response> {
       ...(request.signal ? { signal: request.signal } : {}),
     });
 
-    // No speech in a window the VAD thought was speech is a normal outcome and
-    // must produce no dialogue rather than an empty line.
     if (!result) return json({ start: startMs, end: endMs, text: '', segments: [] });
 
     return json({
@@ -108,10 +106,26 @@ export async function POST(request: Request): Promise<Response> {
   }
 }
 
-/** Kept for direct unit/E2E invocation outside Vercel. */
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
-  return POST(request);
+/** Direct tests use Web Request; Vercel uses legacy Node req/res. */
+export default function handler(request: Request): Promise<Response>;
+export default function handler(request: IncomingMessage, response: ServerResponse): Promise<void>;
+export default async function handler(
+  request: Request | IncomingMessage,
+  response?: ServerResponse,
+): Promise<Response | void> {
+  if (request instanceof Request || !response) {
+    if (request.method !== 'POST') return methodNotAllowed('POST');
+    return POST(request);
+  }
+
+  if ((request.method ?? 'GET').toUpperCase() !== 'POST') {
+    await writeWebResponse(response, methodNotAllowed('POST'));
+    return;
+  }
+
+  const webRequest = await toWebRequest(request);
+  const result = await POST(webRequest);
+  await writeWebResponse(response, result);
 }
 
 function numberField(form: FormData, name: string): number | null {
