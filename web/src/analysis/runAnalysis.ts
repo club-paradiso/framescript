@@ -156,7 +156,7 @@ export interface RunAnalysisOptions {
 
 /** Vision stays conservative because each request carries image payloads. */
 const VISION_CONCURRENCY = 2;
-/** Consecutive provider failures after which a stage stops trying. */
+/** Consecutive transient provider failures after which a stage stops trying. */
 const FAILURE_THRESHOLD = 3;
 
 /**
@@ -229,14 +229,20 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
   // --- Reading -----------------------------------------------------------------
   report('reading', undefined, options.file.name);
   let hasAudioTrack: boolean | undefined;
+  let deferredMetadataFailure: { code: FrameScriptErrorCode; detail: string } | undefined;
   if (options.video) {
     try {
       await loadMediaMetadata(options.video);
       durationMs = Math.max(durationMs, secondsToMs(options.video.duration || 0));
       hasAudioTrack = probeAudioTrack(options.video);
     } catch (error) {
-      const code = FrameScriptError.is(error) ? error.code : 'VIDEO_METADATA_FAILED';
-      note(code, errorDetail(error));
+      // A MOV can make Chromium fire metadata late and still become fully
+      // playable. Defer the notice until after picture scanning so final state,
+      // not an early timer, decides whether metadata actually failed.
+      deferredMetadataFailure = {
+        code: FrameScriptError.is(error) ? error.code : 'VIDEO_METADATA_FAILED',
+        detail: errorDetail(error),
+      };
     }
   }
 
@@ -336,9 +342,13 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
           consecutiveFailures++;
           const code = FrameScriptError.is(error) ? error.code : 'ASR_PROVIDER_FAILED';
           note(code, errorDetail(error));
-          // Not configured, or refusing us outright: every remaining window
-          // would fail the same way, so stop rather than make 200 doomed calls.
-          if (code === 'ASR_NOT_CONFIGURED' || consecutiveFailures >= FAILURE_THRESHOLD) {
+          // Deterministic request/auth/model/validation errors cannot improve on
+          // the next window. Stop immediately; transient failures get a small
+          // bounded budget before local-only analysis continues.
+          if (
+            (FrameScriptError.is(error) && !error.recoverable) ||
+            consecutiveFailures >= FAILURE_THRESHOLD
+          ) {
             stopStage = true;
           }
         } finally {
@@ -384,6 +394,19 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
     stats.keyframesCaptured = scan.stats.keyframesCaptured;
     stats.keyframeBytes = scan.stats.keyframeBytes;
     if (scan.failure) note(scan.failure.code, scan.failure.detail);
+  }
+
+  // Only surface the early metadata timeout if the browser never recovered.
+  // Successful observations or valid final dimensions/duration are stronger
+  // evidence than a stale 20-second timer.
+  if (deferredMetadataFailure && options.video) {
+    const finalMetadataAvailable =
+      Number.isFinite(options.video.duration) &&
+      options.video.duration > 0 &&
+      options.video.videoWidth > 0 &&
+      options.video.videoHeight > 0;
+    const recovered = finalMetadataAvailable || videoObservedMs > 0 || stats.observations > 0;
+    if (!recovered) note(deferredMetadataFailure.code, deferredMetadataFailure.detail);
   }
 
   if (
@@ -445,7 +468,10 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
           consecutiveFailures++;
           const code = FrameScriptError.is(error) ? error.code : 'VISION_PROVIDER_FAILED';
           note(code, errorDetail(error));
-          if (code === 'VISION_NOT_CONFIGURED' || consecutiveFailures >= FAILURE_THRESHOLD) {
+          if (
+            (FrameScriptError.is(error) && !error.recoverable) ||
+            consecutiveFailures >= FAILURE_THRESHOLD
+          ) {
             stopStage = true;
           }
         } finally {
