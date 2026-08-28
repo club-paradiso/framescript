@@ -3,6 +3,7 @@
 import { expect, test, chromium, type Browser, type Page } from '@playwright/test';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { readdirSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -155,7 +156,7 @@ test('installs an offline shell without caching user files', async () => {
     };
   });
   expect(state.scope).toBe(origin + '/');
-  expect(state.keys).toContain('framescript-studio-v2');
+  expect(state.keys).toContain('framescript-studio-v3');
   expect(state.cachedUrls.every((url) => !url.startsWith('blob:'))).toBe(true);
 
   await page.context().setOffline(true);
@@ -308,12 +309,47 @@ test('analyzes deterministic local audio without uploading it', async () => {
 
   const analyzer = page.locator('.card', { hasText: 'Analyze media' });
   await expect(analyzer.getByText('fixture-speech.wav')).toBeVisible();
-  await expect(
-    page.getByText(/does not transcribe speech or describe what is visible/i),
-  ).toBeVisible();
+  // This build serves no /api routes, so the capability readout must say so
+  // rather than offering a control that cannot work.
+  await expect(analyzer.locator('.capability', { hasText: 'Transcription' })).toContainText(
+    'Not configured',
+  );
   await page.getByRole('button', { name: 'Analyze', exact: true }).click();
-  await expect(page.getByText(/Analyzed · 2 speech regions, 2 speakers/)).toBeVisible({
-    timeout: 45_000,
-  });
-  expect(requests.every((url) => url.startsWith(origin))).toBe(true);
+  await expect(analyzer.getByText('Analysis complete')).toBeVisible({ timeout: 45_000 });
+  await expect(analyzer.getByText('2 speech regions')).toBeVisible();
+  await expect(analyzer.getByText('2 speaker clusters')).toBeVisible();
+  expect(requests.every((url) => url.startsWith(origin) || url.startsWith('blob:'))).toBe(true);
+});
+
+test('ships no provider credential, endpoint or auth header in the client bundle', () => {
+  // Studio talks only to its own origin. Anything below appearing in the bundle
+  // would mean a provider call had leaked back into the browser, taking the
+  // key or the endpoint with it.
+  const forbidden = [
+    'FRAMESCRIPT_ASR_API_KEY',
+    'FRAMESCRIPT_VISION_API_KEY',
+    'FRAMESCRIPT_ASR_ENDPOINT',
+    'FRAMESCRIPT_VISION_ENDPOINT',
+    'api.openai.com',
+    'api.anthropic.com',
+    'anthropic-version',
+    'x-api-key',
+    'audio/transcriptions',
+    'process.env',
+    'import.meta.env.VITE_',
+  ];
+
+  const assets = join(DIST, 'assets');
+  const files = readdirSync(assets).filter((name) => name.endsWith('.js') || name.endsWith('.css'));
+  expect(files.length).toBeGreaterThan(0);
+
+  for (const name of files) {
+    const contents = readFileSync(join(assets, name), 'utf8');
+    for (const marker of forbidden) {
+      expect(contents, `${name} must not contain "${marker}"`).not.toContain(marker);
+    }
+  }
+
+  const html = readFileSync(join(DIST, 'index.html'), 'utf8');
+  for (const marker of forbidden) expect(html).not.toContain(marker);
 });

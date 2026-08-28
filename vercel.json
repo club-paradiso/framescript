@@ -4,12 +4,22 @@
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist-web",
   "rewrites": [
-    { "source": "/((?!assets/|icons/|manifest.webmanifest|sw.js).*)", "destination": "/index.html" }
+    {
+      "source": "/((?!api/|assets/|icons/|manifest.webmanifest|sw.js).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/sw.js",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate" },
+        { "key": "Vary", "value": "*" }
+      ]
     },
     {
       "source": "/assets/(.*)",

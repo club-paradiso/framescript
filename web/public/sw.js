@@ -11,9 +11,14 @@
  *
  * It never caches or inspects user media. Files the user opens are read through
  * the File API and never touch this cache.
+ *
+ * `/api/*` is excluded outright. Those requests carry speech windows, selected
+ * keyframes and transcripts; none of it may be stored, replayed from a cache,
+ * or served to a later visitor. The guard is by URL prefix rather than by
+ * method, so a GET to an API route is skipped too.
  */
 
-const VERSION = 'framescript-studio-v2';
+const VERSION = 'framescript-studio-v3';
 const SHELL = [
   '/',
   '/studio',
@@ -76,6 +81,10 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+
+  // Analysis endpoints: never cached, never intercepted. Falls through to the
+  // network exactly as if no service worker were installed.
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

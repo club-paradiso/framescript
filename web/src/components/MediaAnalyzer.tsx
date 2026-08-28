@@ -1,23 +1,39 @@
 /**
  * Media analysis controls.
  *
- * Audio and picture are analyzed very differently here, and the UI says so
- * rather than presenting one progress bar for two unlike jobs:
+ * The panel's job is to stop the app claiming capabilities it does not have.
+ * Three things are shown before anything runs:
  *
- *  - Audio decodes in full and analyzes far faster than real time. Coverage is
- *    complete.
- *  - Picture is observed during playback. It takes real time divided by the
- *    scan rate, and whatever the user stops early is genuinely not observed.
+ *   - which evidence sources are available *on this deployment*, checked
+ *     against `/api/capabilities` rather than assumed;
+ *   - what each analysis stage will actually do, including the bounded number
+ *     of remote requests;
+ *   - what leaves the device, in the same place as the switch that causes it.
+ *
+ * During a run the phases are named and the progress is measured. Where a
+ * ratio genuinely is not knowable the bar is indeterminate rather than
+ * animated toward an invented number.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { profileFor, secondsToMs, type AnalysisFidelity, type EvidenceEvent } from '@/core';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { profileFor, type AnalysisFidelity, type EvidenceEvent } from '@/core';
 import {
-  analyzeAudioBuffer,
-  decodeAudio,
-  scanVideoDuringPlayback,
+  UNREACHABLE_CAPABILITIES,
+  fetchCapabilities,
+  type Capabilities,
+} from '../analysis/apiClient';
+import {
+  runAnalysis,
+  summarizeOutcome,
+  type AnalysisOutcome,
   type AnalysisProgress,
-} from '../analysis/localMediaAnalyzer';
+} from '../analysis/runAnalysis';
+import { buildDiagnostics, formatDiagnostics } from '../analysis/diagnostics';
+
+const APP_VERSION = '0.1.0';
+/** Scene-understanding budgets. Separate from local fidelity, on purpose. */
+const SCENE_BUDGETS = { off: 0, key: 6, extended: 12 } as const;
+type SceneDepth = keyof typeof SCENE_BUDGETS;
 
 export function MediaAnalyzer({
   file,
@@ -30,122 +46,117 @@ export function MediaAnalyzer({
   const [scanRate, setScanRate] = useState(4);
   const [analyzeAudio, setAnalyzeAudio] = useState(true);
   const [analyzeVideo, setAnalyzeVideo] = useState(true);
+  const [transcribe, setTranscribe] = useState(true);
+  const [sceneDepth, setSceneDepth] = useState<SceneDepth>('key');
   const [progress, setProgress] = useState<AnalysisProgress | null>(null);
-  const [done, setDone] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<AnalysisOutcome | null>(null);
+  const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
+  const [copied, setCopied] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string>();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     const url = URL.createObjectURL(file);
     setObjectUrl(url);
-    setDone(null);
+    setOutcome(null);
     setProgress(null);
-    setError(null);
+    setCopied(false);
+    const controller = abortRef.current;
     return () => {
       URL.revokeObjectURL(url);
       setObjectUrl(undefined);
-      abortRef.current?.abort();
+      controller?.abort();
     };
   }, [file]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchCapabilities(controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setCapabilities(value);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCapabilities(UNREACHABLE_CAPABILITIES);
+      });
+    return () => controller.abort();
+  }, []);
+
   const isVideo = /\.(mp4|m4v|mov|webm|mkv)$/i.test(file.name);
+  const resolved = capabilities ?? UNREACHABLE_CAPABILITIES;
+  const canTranscribe = resolved.transcription.configured;
+  const canSeeScenes = resolved.vision.configured && isVideo;
+  const sceneWindows = SCENE_BUDGETS[sceneDepth];
 
   const run = useCallback(async () => {
     const controller = new AbortController();
     abortRef.current = controller;
-    setError(null);
-    setDone(null);
-
-    const events: EvidenceEvent[] = [];
-    const summary: string[] = [];
-    let durationMs = 0;
+    setOutcome(null);
 
     try {
-      // --- Audio: complete, offline ---------------------------------------
-      if (analyzeAudio) {
-        setProgress({ phase: 'decoding', message: 'Decoding audio…' });
-        const buffer = await decodeAudio(file, controller.signal);
-        if (controller.signal.aborted) return;
-
-        if (!buffer) {
-          summary.push('no decodable audio track');
-        } else {
-          durationMs = Math.max(durationMs, secondsToMs(buffer.duration));
-          setProgress({
-            phase: 'audio',
-            ratio: 0,
-            message: 'Analyzing speech, speakers and sound…',
-          });
-          const audio = await analyzeAudioBuffer(buffer, (ratio) =>
-            setProgress({
-              phase: 'audio',
-              ratio,
-              message: 'Analyzing speech, speakers and sound…',
-            }),
-          );
-          events.push(...audio.events);
-          summary.push(
-            `${audio.stats.speechRegions} speech regions, ${audio.stats.speakers} speakers, ${audio.stats.soundEvents} sound events`,
-          );
-        }
-      }
-
-      // --- Picture: playback-driven ----------------------------------------
-      if (analyzeVideo && isVideo && videoRef.current) {
-        const video = videoRef.current;
-        if (video.readyState < 1) {
-          await new Promise<void>((resolve) => {
-            video.addEventListener('loadedmetadata', () => resolve(), { once: true });
-          });
-        }
-        durationMs = Math.max(durationMs, secondsToMs(video.duration || 0));
-
-        setProgress({
-          phase: 'video',
-          ratio: 0,
-          message: `Observing the picture at ${scanRate}×…`,
-        });
-        const scan = await scanVideoDuringPlayback(video, {
-          fidelity,
-          scanRate,
-          signal: controller.signal,
-          onProgress: (ratio) =>
-            setProgress({
-              phase: 'video',
-              ratio,
-              message: `Observing the picture at ${scanRate}×…`,
-            }),
-        });
-        events.push(...scan.events);
-        summary.push(
-          `${scan.stats.observations} observations, ${scan.stats.sceneCuts} scene changes, ${scan.stats.actionSegments} action segments`,
-        );
-      }
-
-      setProgress({ phase: 'done', message: 'Done' });
-      const text = summary.join(' · ') || 'nothing analyzed';
-      setDone(text);
-      onComplete(events, durationMs, text);
-    } catch (err) {
-      setError(
-        err instanceof DOMException && err.name === 'NotSupportedError'
-          ? 'This browser cannot decode that media file. Try a broadly supported MP4, WebM, MP3, or WAV file.'
-          : 'Local analysis failed. The file remains available so you can adjust the sources and try again.',
-      );
+      const result = await runAnalysis({
+        file,
+        video: isVideo ? videoRef.current : null,
+        fidelity,
+        scanRate,
+        analyzeAudio,
+        analyzeVideo: analyzeVideo && isVideo,
+        transcribe: transcribe && canTranscribe,
+        sceneUnderstanding: canSeeScenes && sceneWindows > 0,
+        maxSceneWindows: sceneWindows,
+        capabilities: resolved,
+        signal: controller.signal,
+        onProgress: setProgress,
+      });
+      setOutcome(result);
+      onComplete(result.events, result.durationMs, summarizeOutcome(result));
     } finally {
       setProgress(null);
       abortRef.current = null;
     }
-  }, [analyzeAudio, analyzeVideo, fidelity, file, isVideo, onComplete, scanRate]);
+  }, [
+    analyzeAudio,
+    analyzeVideo,
+    canSeeScenes,
+    canTranscribe,
+    fidelity,
+    file,
+    isVideo,
+    onComplete,
+    resolved,
+    sceneWindows,
+    scanRate,
+    transcribe,
+  ]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
+
+  const copyDiagnostics = useCallback(() => {
+    const video = videoRef.current;
+    const report = buildDiagnostics({
+      version: APP_VERSION,
+      file: { name: file.name, size: file.size, type: file.type },
+      media: {
+        ...(outcome?.durationMs ? { durationMs: outcome.durationMs } : {}),
+        ...(video?.videoWidth ? { videoWidth: video.videoWidth } : {}),
+        ...(video?.videoHeight ? { videoHeight: video.videoHeight } : {}),
+      },
+      capabilities: resolved,
+      ...(outcome ? { outcome } : {}),
+    });
+    void navigator.clipboard?.writeText(formatDiagnostics(report)).then(
+      () => setCopied(true),
+      () => setCopied(false),
+    );
+  }, [file, outcome, resolved]);
+
   const running = progress !== null;
   const profile = profileFor(fidelity);
+  const summary = useMemo(() => (outcome ? summaryLines(outcome) : []), [outcome]);
 
   return (
-    <section className="card">
+    <section className="card analyzer">
       <h2 className="eyebrow">Analyze media</h2>
       <p className="muted small">{file.name}</p>
 
@@ -160,9 +171,36 @@ export function MediaAnalyzer({
         />
       )}
 
+      <dl className="capabilities" aria-label="Analysis capabilities">
+        <Capability label="Audio decoding" state="Local" />
+        <Capability label="Speech detection" state="Local" />
+        <Capability label="Speaker clustering" state="Local" />
+        <Capability
+          label="Transcription"
+          state={capabilities === null ? 'Checking…' : canTranscribe ? 'Ready' : 'Not configured'}
+          hint={canTranscribe ? resolved.transcription.model : resolved.transcription.reason}
+          muted={!canTranscribe}
+        />
+        {isVideo && <Capability label="Picture scanning" state="Local" />}
+        {isVideo && (
+          <Capability
+            label="Visual understanding"
+            state={
+              capabilities === null
+                ? 'Checking…'
+                : resolved.vision.configured
+                  ? 'Ready'
+                  : 'Not configured'
+            }
+            hint={resolved.vision.configured ? resolved.vision.model : resolved.vision.reason}
+            muted={!resolved.vision.configured}
+          />
+        )}
+      </dl>
+
       <div className="field">
         <label className="field__label" htmlFor="fidelity">
-          Fidelity
+          Local observation fidelity
         </label>
         <select
           id="fidelity"
@@ -221,14 +259,54 @@ export function MediaAnalyzer({
             <span>Picture — motion and scene changes</span>
           </label>
         )}
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={transcribe && canTranscribe}
+            disabled={running || !canTranscribe}
+            onChange={(e) => setTranscribe(e.target.checked)}
+          />
+          <span>
+            Transcribe detected speech
+            <em className="muted small">
+              {canTranscribe
+                ? ' Sends only the detected speech windows, 16 kHz mono, to this site’s own endpoint.'
+                : ' Unavailable: this deployment has no transcription provider configured.'}
+            </em>
+          </span>
+        </label>
       </div>
+
+      {isVideo && (
+        <div className="field">
+          <label className="field__label" htmlFor="scene-depth">
+            Scene understanding
+          </label>
+          <select
+            id="scene-depth"
+            className="select"
+            value={sceneDepth}
+            disabled={running || !canSeeScenes}
+            onChange={(e) => setSceneDepth(e.target.value as SceneDepth)}
+          >
+            <option value="off">Off — local motion and cuts only</option>
+            <option value="key">Key scenes — up to 6 selected windows</option>
+            <option value="extended">Extended — up to 12 selected windows</option>
+          </select>
+          <p className="muted small">
+            {canSeeScenes
+              ? `At most ${sceneWindows} requests for this file, each carrying up to 3 downscaled keyframes chosen around a cut or a sustained action. Never the video.`
+              : 'Unavailable: this deployment has no scene-understanding provider configured.'}
+          </p>
+        </div>
+      )}
 
       {running ? (
         <>
           <div
             className={`progress${progress.ratio === undefined ? ' progress--indeterminate' : ''}`}
             role="progressbar"
-            aria-label={progress.message}
+            aria-label={progress.label}
             {...(progress.ratio === undefined
               ? {}
               : {
@@ -244,7 +322,10 @@ export function MediaAnalyzer({
               }
             />
           </div>
-          <p className="muted small">{progress.message}</p>
+          <p className="small" aria-live="polite">
+            <strong>{progress.label}</strong>
+            {progress.detail ? <span className="muted"> — {progress.detail}</span> : null}
+          </p>
           <button className="button" onClick={stop}>
             Stop
           </button>
@@ -255,18 +336,108 @@ export function MediaAnalyzer({
           disabled={!analyzeAudio && (!isVideo || !analyzeVideo)}
           onClick={() => void run()}
         >
-          Analyze
+          {outcome ? 'Analyze again' : 'Analyze'}
         </button>
       )}
 
-      {done && <p className="small">Analyzed: {done}</p>}
-      {error && <p className="warning small">{error}</p>}
+      {outcome && (
+        <div className="analysis-summary">
+          <h3 className="small">{outcome.aborted ? 'Analysis stopped' : 'Analysis complete'}</h3>
+          <ul className="small">
+            {summary.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {outcome.notices.length > 0 && (
+            <ul className="analysis-notices small" aria-label="Analysis notices">
+              {outcome.notices.map((notice) => (
+                <li className="warning" key={notice.code}>
+                  {notice.message}
+                </li>
+              ))}
+            </ul>
+          )}
+          <button className="button button--ghost" type="button" onClick={copyDiagnostics}>
+            {copied ? 'Diagnostics copied' : 'Copy diagnostics'}
+          </button>
+        </div>
+      )}
 
       <p className="muted small">
-        Local analysis finds speech, speakers, sound, silence, motion and scene changes. It does not
-        transcribe speech or describe what is visible — that needs a model, which this app does not
-        bundle.
+        Speech detection, speaker clustering, sound, silence, motion and scene changes all run on
+        this device. Dialogue text and scene descriptions require a model: when this deployment has
+        one configured, only the detected speech windows and the selected keyframes are sent to this
+        site’s own endpoint. The media file itself is never uploaded.
       </p>
     </section>
   );
+}
+
+function Capability({
+  label,
+  state,
+  hint,
+  muted,
+}: {
+  label: string;
+  state: string;
+  hint?: string | undefined;
+  muted?: boolean;
+}) {
+  return (
+    <div className={'capability' + (muted ? ' capability--muted' : '')}>
+      <dt>{label}</dt>
+      <dd>
+        {state}
+        {hint ? <span className="muted small"> {hint}</span> : null}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * Turns the outcome into counted statements.
+ *
+ * Every line here is a measured value. Coverage claims are kept apart on
+ * purpose: observing 100% of a timeline is not the same as transcribing 100%
+ * of its speech, and conflating them is the exact overclaim this panel exists
+ * to avoid.
+ */
+function summaryLines(outcome: AnalysisOutcome): string[] {
+  const lines: string[] = [];
+  const { stats, coverage } = outcome;
+
+  if (coverage.audioDecoded) {
+    lines.push(`${stats.speechRegions} speech regions`);
+    lines.push(`${stats.speakers} speaker clusters`);
+    if (stats.soundEvents > 0) lines.push(`${stats.soundEvents} sound events`);
+  } else {
+    lines.push('No audio analyzed');
+  }
+
+  if (stats.speechWindowsPlanned > 0) {
+    lines.push(
+      `${stats.dialogueSegments} transcribed dialogue segments from ${stats.speechWindowsTranscribed} of ${stats.speechWindowsPlanned} speech windows`,
+    );
+  }
+  if (stats.observations > 0) {
+    lines.push(`${stats.observations} picture observations`);
+    lines.push(`${stats.sceneCuts} scene changes`);
+  }
+  if (stats.keyframeWindows > 0) {
+    lines.push(
+      `${stats.sceneObservations} semantic scene observations from ${stats.keyframeWindows} analyzed windows`,
+    );
+  }
+  if (coverage.durationMs > 0 && coverage.videoObservedMs > 0) {
+    const percent = Math.min(
+      100,
+      Math.round((coverage.videoObservedMs / coverage.durationMs) * 100),
+    );
+    lines.push(`${percent}% of the picture timeline observed`);
+  }
+  if (coverage.transcribedRatio !== undefined) {
+    lines.push(`${Math.round(coverage.transcribedRatio * 100)}% of detected speech transcribed`);
+  }
+  return lines;
 }

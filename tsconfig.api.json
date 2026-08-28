@@ -1,0 +1,32 @@
+{
+  // The Vercel functions in `api/`.
+  //
+  // Kept out of `tsconfig.json` because `src` is browser and extension code and
+  // must not gain Node globals. These routes are the opposite: they run only on
+  // the server, they are the only code allowed to read `process.env`, and they
+  // are never part of the client bundle.
+  //
+  // `fetch`, `Request`, `Response`, `FormData` and `Blob` come from @types/node
+  // rather than the DOM lib, which is why "dom" is deliberately absent.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true
+  },
+  "include": ["api"],
+  "exclude": ["node_modules"]
+}

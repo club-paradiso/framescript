@@ -170,7 +170,13 @@ export function LandingPage() {
               <span aria-hidden="true">→</span>
               <FlowStep title="Screenplay" body="Review and export locally." />
             </div>
-            <p className="privacy-statement">No upload. No account. No analytics.</p>
+            <p className="privacy-statement">Your file is never uploaded. No account. No analytics.</p>
+            <p className="privacy-footnote">
+              Turning speech into dialogue needs a model. Where a deployment configures one, Studio
+              sends only the detected speech windows — 16 kHz mono, seconds long — and the few
+              keyframes chosen around a scene change, to this site’s own endpoint. Never the file,
+              never the silence, never the whole picture.
+            </p>
           </div>
         </section>
 

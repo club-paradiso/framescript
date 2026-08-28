@@ -66,7 +66,14 @@ export function DocsPage() {
             <p>
               Studio accepts SRT, WebVTT, supported browser-decodable video and audio, and versioned
               FrameScript JSON projects. Multiple subtitle languages are aligned into one scene
-              structure. Media is read with browser File APIs and is not uploaded.
+              structure. Media is read with browser File APIs and the file itself is never uploaded.
+            </p>
+            <p>
+              Speech detection, speaker clustering, sound, silence, motion and scene changes are
+              computed on your device. Turning detected speech into dialogue, and turning a scene
+              into a description, require a model. Studio shows which of those a deployment has
+              configured before you start, and reports how much of the detected speech was actually
+              transcribed rather than implying a full script.
             </p>
             <a className="button button--primary" href="/studio">
               Open Studio
@@ -93,9 +100,13 @@ export function DocsPage() {
           </DocSection>
           <DocSection id="privacy" title="Privacy">
             <p>
-              Normal Studio workflows have no backend, account, analytics, or client secret. Local
-              media remains on the device. The extension’s optional remote model integrations are
-              separate, opt-in, and configured in the extension.
+              Studio has no account, no analytics and no client-side secret, and local-only
+              workflows — subtitles, projects, and structural media analysis — reach no server at
+              all. When transcription or scene understanding is enabled, the request goes to this
+              site’s own endpoint, which holds the provider credential server-side: the browser
+              never sees a key. What is sent is bounded to the detected speech windows and the
+              selected keyframes, and nothing is stored. The extension’s remote model integrations
+              are separate, opt-in, and configured with your own key in the extension.
             </p>
           </DocSection>
           <DocSection id="development" title="Development and deployment">

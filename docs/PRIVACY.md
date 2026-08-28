@@ -43,10 +43,22 @@ carry temporal ordering.
 
 ## Remote AI
 
-Off by default. Turning it on requires two separate actions in Settings → AI:
-acknowledging a notice that enumerates exactly what would be sent, and then
-enabling the feature. The notice is generated from your live configuration, not
-written as static copy.
+Two capabilities cannot be computed on device: turning speech into words, and
+turning a picture into a description. Everything else — speech detection,
+speaker clustering, sound, silence, motion, scene boundaries, scene
+construction, the screenplay — is local under every configuration.
+
+**In the extension**, remote AI is off by default. Turning it on requires two
+separate actions in Settings → AI: acknowledging a notice that enumerates
+exactly what would be sent, and then enabling the feature. The notice is
+generated from your live configuration, not written as static copy.
+
+**In Web Studio**, the browser never holds a provider key. Requests go to the
+site's own origin (`/api/transcribe`, `/api/analyze-frame`) and the deployment
+holds the credential server-side. Studio asks `/api/capabilities` before
+analysis and shows each source as Ready or Not configured, so it never offers a
+control that cannot work. A deployment with nothing configured makes no remote
+request at all, and says so.
 
 When enabled with a vision provider, each *analyzed window* sends:
 
@@ -61,7 +73,14 @@ are never sent — VAD gates this.
 
 **Never sent, under any configuration:** the full video, the full audio track,
 your account details, your viewing history, your list of watched titles, or your
-IP address to anyone but the endpoint you chose.
+IP address to anyone but the endpoint you chose (in Studio, the site you are
+already on).
+
+Both stages are bounded per file. Transcription plans speech windows against a
+total budget; scene understanding is capped by an explicit control that is
+separate from local observation fidelity, so choosing a denser local scan never
+sends more. Nothing is retained server-side: the analysis routes store nothing,
+respond with `no-store`, and the service worker skips `/api/` entirely.
 
 A 120-minute film in Detailed mode produces roughly 72,000 observations and
 roughly 7,000 deep-analysis candidates, of which the budget admits a small
@@ -70,8 +89,15 @@ transmission.
 
 ## API keys
 
-Stored in `chrome.storage.local`. Not `chrome.storage.sync`, specifically so the
-browser does not replicate your keys to your other machines without you asking.
+Extension keys are stored in `chrome.storage.local`. Not `chrome.storage.sync`,
+specifically so the browser does not replicate your keys to your other machines
+without you asking.
+
+Studio keys are not stored in the browser at all. They live in the deployment's
+server environment, are read only by the API routes, and are never included in
+any response — `/api/capabilities` returns provider and model names but never a
+key or an endpoint. A regression test asserts the built client bundle contains
+no credential, provider endpoint, or provider auth header.
 
 Keys are never logged, never included in error messages, and never sent anywhere
 except the endpoint you configured. Error handling deliberately excludes provider
@@ -86,9 +112,15 @@ list and delete them individually, or delete all of them, in Settings → Storag
 
 ## Diagnostics
 
-The diagnostics panel (Settings → Advanced) reports measured rates, source
-states and queue depths. It is off by default and everything in it stays local.
-No diagnostic data is transmitted, ever.
+The extension's diagnostics panel (Settings → Advanced) reports measured rates,
+source states and queue depths. It is off by default and everything in it stays
+local. No diagnostic data is transmitted, ever.
+
+Studio's "Copy diagnostics" writes a report to your clipboard and nowhere else.
+It is built from an allowlist — version, browser, media dimensions, phase
+counts, request tallies, error codes — so it carries no transcript, no evidence
+payload, no media bytes, no file path and no credential. Filenames are reduced
+to a bounded base name.
 
 ## Third parties
 
