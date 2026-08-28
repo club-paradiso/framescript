@@ -13,7 +13,7 @@
  * the evidence this produces.
  */
 
-import { isError, readVisionConfig, LIMITS } from './_lib/config';
+import { isError, readVisionConfig, LIMITS } from './_lib/config.js';
 import {
   badRequest,
   declaredTooLarge,
@@ -21,11 +21,11 @@ import {
   json,
   methodNotAllowed,
   tooLarge,
-} from './_lib/http';
-import { AnthropicVisionProvider } from '../src/ai/providers/anthropic';
-import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision';
-import { fromBase64 } from '../src/utils/base64';
-import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types';
+} from './_lib/http.js';
+import { AnthropicVisionProvider } from '../src/ai/providers/anthropic.js';
+import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision.js';
+import { fromBase64 } from '../src/utils/base64.js';
+import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types.js';
 
 export const config = { maxDuration: 60 };
 
