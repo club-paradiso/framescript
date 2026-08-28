@@ -154,11 +154,31 @@ export interface RunAnalysisOptions {
   signal: AbortSignal;
 }
 
-/** Concurrency caps. Deliberately small: this runs beside video playback. */
-const ASR_CONCURRENCY = 2;
+/** Vision stays conservative because each request carries image payloads. */
 const VISION_CONCURRENCY = 2;
 /** Consecutive provider failures after which a stage stops trying. */
 const FAILURE_THRESHOLD = 3;
+
+/**
+ * Chooses bounded ASR parallelism without punishing lower-end/mobile devices.
+ *
+ * Transcription calls are mostly network-bound, so capable desktops can keep
+ * more speech windows in flight. The hard ceiling of four is intentionally
+ * modest to avoid provider bursts, memory spikes, and rate-limit self-harm.
+ */
+export function preferredAsrConcurrency(
+  windowCount: number,
+  hardwareConcurrency?: number,
+): number {
+  if (windowCount <= 1) return 1;
+  const deviceLimit =
+    hardwareConcurrency !== undefined && hardwareConcurrency <= 4
+      ? 2
+      : hardwareConcurrency !== undefined && hardwareConcurrency >= 8
+        ? 4
+        : 3;
+  return Math.max(1, Math.min(windowCount, deviceLimit));
+}
 
 export async function runAnalysis(options: RunAnalysisOptions): Promise<AnalysisOutcome> {
   const events: EvidenceEvent[] = [];
@@ -275,10 +295,13 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
     let consecutiveFailures = 0;
     let stopStage = false;
     let completed = 0;
+    const hardwareConcurrency =
+      typeof navigator === 'undefined' ? undefined : navigator.hardwareConcurrency;
+    const asrConcurrency = preferredAsrConcurrency(plan.windows.length, hardwareConcurrency);
 
     await runBounded(
       plan.windows,
-      ASR_CONCURRENCY,
+      asrConcurrency,
       async (window) => {
         if (stopStage || aborted()) return;
         // Encode inside the worker: preparing every WAV up front would hold the
