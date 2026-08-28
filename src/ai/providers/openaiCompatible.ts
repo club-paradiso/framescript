@@ -26,10 +26,10 @@ import type {
   AsrSegment,
   ProviderAvailability,
   SpeechRecognitionProvider,
-} from '../types';
-import { encodeWav, resampleLinear } from '../../audio/dsp';
-import { FrameScriptError } from '../../utils/errors';
-import { providerError } from '../retry';
+} from '../types.js';
+import { encodeWav, resampleLinear } from '../../audio/dsp.js';
+import { FrameScriptError } from '../../utils/errors.js';
+import { providerError } from '../retry.js';
 
 export interface OpenAiCompatibleAsrConfig {
   apiKey: string;
@@ -50,6 +50,20 @@ export interface OpenAiCompatibleAsrConfig {
 export const DEFAULT_ASR_SAMPLE_RATE = 16_000;
 export const DEFAULT_ASR_MAX_WINDOW_MS = 30_000;
 
+const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+  en: 'en',
+  eng: 'en',
+  english: 'en',
+  ko: 'ko',
+  kor: 'ko',
+  korean: 'ko',
+  es: 'es',
+  spa: 'es',
+  spanish: 'es',
+  espanol: 'es',
+  español: 'es',
+};
+
 interface TranscriptionResponse {
   text?: string;
   language?: string;
@@ -68,6 +82,34 @@ export interface TranscribeWavRequest {
   signal?: AbortSignal;
   /** Injected in tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
+}
+
+/**
+ * Canonicalizes common provider language labels into stable BCP-47 primary
+ * language tags. Some transcription APIs return `english`/`korean`/`spanish`
+ * while others return `en`/`ko`/`es`; carrying those strings verbatim would
+ * split one language into several screenplay variants.
+ *
+ * An explicit language hint is the fallback when the provider omits language
+ * metadata. This is particularly useful for compatible endpoints that return
+ * only `{ text }` even though they accepted the hint correctly.
+ */
+export function normalizeAsrLanguage(
+  providerLanguage?: string,
+  languageHint?: string,
+): string | undefined {
+  for (const candidate of [providerLanguage, languageHint]) {
+    if (!candidate) continue;
+    const normalized = candidate.trim().toLocaleLowerCase().replace(/_/g, '-');
+    if (!normalized) continue;
+    const aliased = LANGUAGE_ALIASES[normalized];
+    if (aliased) return aliased;
+
+    const primary = normalized.split('-')[0];
+    if (!primary || !/^[a-z]{2,3}$/.test(primary)) continue;
+    return LANGUAGE_ALIASES[primary] ?? primary;
+  }
+  return undefined;
 }
 
 /**
@@ -111,25 +153,16 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
 
   const text = typeof json.text === 'string' ? json.text.trim() : '';
   const segments = normalizeSegments(json.segments);
-  // An empty transcript is a legitimate outcome for a window that turned out to
-  // hold no words. It must produce no evidence rather than an empty line.
   if (!text && segments.length === 0) return null;
 
+  const language = normalizeAsrLanguage(json.language, request.languageHint);
   return {
     text: text || segments.map((segment) => segment.text).join(' ').trim(),
-    ...(typeof json.language === 'string' && json.language ? { language: json.language } : {}),
+    ...(language ? { language } : {}),
     ...(segments.length > 0 ? { segments } : {}),
   };
 }
 
-/**
- * Wraps WAV bytes in a Blob.
- *
- * Goes through a plain `ArrayBuffer` because this module is compiled twice —
- * once with the DOM lib for the extension and Studio, once with Node's types
- * for the server route — and `ArrayBuffer` is the one source type both Blob
- * constructors accept without a cast.
- */
 function wavBlob(wav: Uint8Array): Blob {
   const buffer = new ArrayBuffer(wav.byteLength);
   new Uint8Array(buffer).set(wav);
@@ -150,14 +183,12 @@ function normalizeSegments(raw: TranscriptionResponse['segments']): AsrSegment[]
   return out;
 }
 
-/** Resamples to mono 16 kHz and encodes a WAV. Exported so callers can preview size. */
 export function encodeAsrWindow(
   samples: Float32Array,
   sampleRate: number,
   targetSampleRate = DEFAULT_ASR_SAMPLE_RATE,
 ): Uint8Array | null {
   const resampled = resampleLinear(samples, sampleRate, targetSampleRate);
-  // Under 100 ms there is nothing any provider could usefully transcribe.
   if (resampled.length < targetSampleRate * 0.1) return null;
   return encodeWav(resampled, targetSampleRate);
 }
@@ -189,8 +220,6 @@ export class OpenAiCompatibleAsrProvider implements SpeechRecognitionProvider {
     const maxWindow = this.#config.maxWindowMs ?? DEFAULT_ASR_MAX_WINDOW_MS;
     if (durationMs <= 0) return null;
     if (durationMs > maxWindow) {
-      // The caller is responsible for splitting; sending a 10-minute region
-      // would be both expensive and useless for alignment.
       throw new FrameScriptError({
         code: 'ASR_PROVIDER_FAILED',
         detail: `speech window ${durationMs}ms exceeds ${maxWindow}ms limit`,

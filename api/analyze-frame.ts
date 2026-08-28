@@ -13,7 +13,8 @@
  * the evidence this produces.
  */
 
-import { isError, readVisionConfig, LIMITS } from './_lib/config';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isError, readVisionConfig, LIMITS } from './_lib/config.js';
 import {
   badRequest,
   declaredTooLarge,
@@ -21,11 +22,12 @@ import {
   json,
   methodNotAllowed,
   tooLarge,
-} from './_lib/http';
-import { AnthropicVisionProvider } from '../src/ai/providers/anthropic';
-import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision';
-import { fromBase64 } from '../src/utils/base64';
-import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types';
+} from './_lib/http.js';
+import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
+import { AnthropicVisionProvider } from '../src/ai/providers/anthropic.js';
+import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision.js';
+import { fromBase64 } from '../src/utils/base64.js';
+import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types.js';
 
 export const config = { maxDuration: 60 };
 
@@ -51,8 +53,7 @@ interface RequestPayload {
   metrics?: unknown;
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
+export async function POST(request: Request): Promise<Response> {
   if (declaredTooLarge(request))
     return tooLarge('Frame payload is larger than this endpoint accepts.');
 
@@ -112,6 +113,29 @@ export default async function handler(request: Request): Promise<Response> {
   }
 }
 
+/** Direct tests use Web Request; Vercel uses legacy Node req/res. */
+export default function handler(request: Request): Promise<Response>;
+export default function handler(request: IncomingMessage, response: ServerResponse): Promise<void>;
+export default async function handler(
+  request: Request | IncomingMessage,
+  response?: ServerResponse,
+): Promise<Response | void> {
+  if (request instanceof Request) {
+    if (request.method !== 'POST') return methodNotAllowed('POST');
+    return POST(request);
+  }
+  if (!response) throw new TypeError('Vercel Node response is required.');
+
+  if ((request.method ?? 'GET').toUpperCase() !== 'POST') {
+    await writeWebResponse(response, methodNotAllowed('POST'));
+    return;
+  }
+
+  const webRequest = await toWebRequest(request);
+  const result = await POST(webRequest);
+  await writeWebResponse(response, result);
+}
+
 function finiteNumber(value: unknown): number | null {
   const n = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(n) && n >= 0 ? n : null;
@@ -134,8 +158,6 @@ function parseFrames(
       return { error: `Unsupported frame type "${mimeType}".` };
     if (typeof raw.data !== 'string' || raw.data.length === 0)
       return { error: 'Frame data missing.' };
-    // base64 inflates by 4/3; check before decoding so a huge string is never
-    // materialized as bytes.
     if ((raw.data.length * 3) / 4 > LIMITS.maxFrameBytes)
       return { error: 'Frame exceeds the size limit.' };
 
