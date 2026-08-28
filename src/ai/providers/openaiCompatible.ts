@@ -26,10 +26,10 @@ import type {
   AsrSegment,
   ProviderAvailability,
   SpeechRecognitionProvider,
-} from '../types';
-import { encodeWav, resampleLinear } from '../../audio/dsp';
-import { FrameScriptError } from '../../utils/errors';
-import { providerError } from '../retry';
+} from '../types.js';
+import { encodeWav, resampleLinear } from '../../audio/dsp.js';
+import { FrameScriptError } from '../../utils/errors.js';
+import { providerError } from '../retry.js';
 
 export interface OpenAiCompatibleAsrConfig {
   apiKey: string;
@@ -153,8 +153,6 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
 
   const text = typeof json.text === 'string' ? json.text.trim() : '';
   const segments = normalizeSegments(json.segments);
-  // An empty transcript is a legitimate outcome for a window that turned out to
-  // hold no words. It must produce no evidence rather than an empty line.
   if (!text && segments.length === 0) return null;
 
   const language = normalizeAsrLanguage(json.language, request.languageHint);
@@ -165,14 +163,6 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
   };
 }
 
-/**
- * Wraps WAV bytes in a Blob.
- *
- * Goes through a plain `ArrayBuffer` because this module is compiled twice —
- * once with the DOM lib for the extension and Studio, once with Node's types
- * for the server route — and `ArrayBuffer` is the one source type both Blob
- * constructors accept without a cast.
- */
 function wavBlob(wav: Uint8Array): Blob {
   const buffer = new ArrayBuffer(wav.byteLength);
   new Uint8Array(buffer).set(wav);
@@ -193,14 +183,12 @@ function normalizeSegments(raw: TranscriptionResponse['segments']): AsrSegment[]
   return out;
 }
 
-/** Resamples to mono 16 kHz and encodes a WAV. Exported so callers can preview size. */
 export function encodeAsrWindow(
   samples: Float32Array,
   sampleRate: number,
   targetSampleRate = DEFAULT_ASR_SAMPLE_RATE,
 ): Uint8Array | null {
   const resampled = resampleLinear(samples, sampleRate, targetSampleRate);
-  // Under 100 ms there is nothing any provider could usefully transcribe.
   if (resampled.length < targetSampleRate * 0.1) return null;
   return encodeWav(resampled, targetSampleRate);
 }
@@ -232,8 +220,6 @@ export class OpenAiCompatibleAsrProvider implements SpeechRecognitionProvider {
     const maxWindow = this.#config.maxWindowMs ?? DEFAULT_ASR_MAX_WINDOW_MS;
     if (durationMs <= 0) return null;
     if (durationMs > maxWindow) {
-      // The caller is responsible for splitting; sending a 10-minute region
-      // would be both expensive and useless for alignment.
       throw new FrameScriptError({
         code: 'ASR_PROVIDER_FAILED',
         detail: `speech window ${durationMs}ms exceeds ${maxWindow}ms limit`,
