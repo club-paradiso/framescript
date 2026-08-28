@@ -15,16 +15,16 @@ import type {
   VisionAnalysisProvider,
   VisionWindowAnalysis,
   VisionWindowRequest,
-} from '../types';
-import { extractJson } from '../validation';
+} from '../types.js';
+import { extractJson } from '../validation.js';
 import {
   VISION_SYSTEM_PROMPT,
   buildVisionUserPrompt,
   validateVisionAnalysis,
-} from '../schemas/visionWindow';
-import { FrameScriptError } from '../../utils/errors';
-import { providerError } from '../retry';
-import { toBase64 } from '../../utils/base64';
+} from '../schemas/visionWindow.js';
+import { FrameScriptError } from '../../utils/errors.js';
+import { providerError } from '../retry.js';
+import { toBase64 } from '../../utils/base64.js';
 
 export interface OpenAiCompatibleVisionConfig {
   apiKey: string;
