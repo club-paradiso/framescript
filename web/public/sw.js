@@ -13,14 +13,43 @@
  * the File API and never touch this cache.
  */
 
-const VERSION = 'framescript-studio-v1';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest'];
+const VERSION = 'framescript-studio-v2';
+const SHELL = [
+  '/',
+  '/studio',
+  '/view',
+  '/docs',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icons/icon-32.png',
+  '/icons/icon-128.png',
+  '/icons/icon-512.png',
+];
+
+async function precacheShell() {
+  const cache = await caches.open(VERSION);
+  await Promise.allSettled(SHELL.map((path) => cache.add(path)));
+
+  // Vite fingerprints production JS and CSS, so discover only the same-origin
+  // /assets references declared by our generated HTML. User files never enter
+  // this path: File API objects are not part of the application shell.
+  const response = await fetch('/index.html', { cache: 'no-cache' });
+  if (!response.ok || response.type !== 'basic') return;
+  const html = await response.clone().text();
+  await cache.put('/index.html', response);
+  const assets = [
+    ...new Set(
+      [...html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g)]
+        .map((match) => match[1])
+        .filter(Boolean),
+    ),
+  ];
+  await Promise.allSettled(assets.map((path) => cache.add(path)));
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches
-      .open(VERSION)
-      .then((cache) => cache.addAll(SHELL))
+    precacheShell()
       .then(() => self.skipWaiting())
       .catch(() => undefined),
   );
@@ -30,7 +59,13 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== VERSION).map((key) => caches.delete(key))))
+      .then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith('framescript-studio-') && key !== VERSION)
+            .map((key) => caches.delete(key)),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -46,14 +81,21 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          void caches.open(VERSION).then((cache) => cache.put('/index.html', copy));
+          if (response.ok && response.type === 'basic') {
+            const copy = response.clone();
+            void caches.open(VERSION).then((cache) => cache.put('/index.html', copy));
+          }
           return response;
         })
         .catch(() => caches.match('/index.html').then((cached) => cached ?? Response.error())),
     );
     return;
   }
+
+  const cacheableDestination = ['script', 'style', 'image', 'font', 'manifest'].includes(
+    request.destination,
+  );
+  if (!cacheableDestination) return;
 
   event.respondWith(
     caches.match(request).then((cached) => {

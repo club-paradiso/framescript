@@ -16,6 +16,13 @@ const FORMATS: { id: ExportFormat; label: string }[] = [
   { id: 'json', label: 'JSON' },
 ];
 
+const OPTIONS = [
+  ['timestamps', 'Timestamps'],
+  ['confidence', 'Confidence'],
+  ['evidence', 'Sources'],
+  ['dialogueOnly', 'Dialogue only'],
+] as const;
+
 export function ExportBar({
   language,
   onExport,
@@ -49,14 +56,9 @@ export function ExportBar({
       </select>
 
       <div className="exportbar__options">
-        {[
-          ['timestamps', 'Timestamps'],
-          ['confidence', 'Confidence'],
-          ['evidence', 'Sources'],
-          ['dialogueOnly', 'Dialogue only'],
-        ].map(([key, label]) => (
+        {OPTIONS.map(([key, label]) => (
           <label key={key} className="check check--inline">
-            <input type="checkbox" checked={options[key] ?? false} onChange={() => toggle(key!)} />
+            <input type="checkbox" checked={options[key] ?? false} onChange={() => toggle(key)} />
             <span>{label}</span>
           </label>
         ))}

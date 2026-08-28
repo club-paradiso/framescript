@@ -7,11 +7,11 @@
  */
 
 import { DropZone } from './DropZone';
-import type { LoadedSource } from '../App';
+import type { LoadedSource } from '../studio/types';
 
 const KIND_LABEL: Record<LoadedSource['kind'], string> = {
   subtitle: 'Subtitles',
-  export: 'Export',
+  project: 'Project',
   media: 'Media',
 };
 

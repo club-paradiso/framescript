@@ -1,15 +1,39 @@
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#0b0c0e" />
-<meta
-  name="description"
-  content="Reconstruct a screenplay from your own media and subtitle files, and read FrameScript screenplays. Everything runs on your device."
-/>
-<link rel="manifest" href="/manifest.webmanifest" />
-<link rel="icon" href="/icons/icon-128.png" />
-<link rel="apple-touch-icon" href="/icons/icon-128.png" />
-<title>FrameScript Studio</title>
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0c0e" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="index,follow" />
+    <meta
+      name="description"
+      content="Turn local video, audio, and subtitle evidence into a structured screenplay with multilingual alignment, provenance, coverage, and conflicts."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="FrameScript" />
+    <meta property="og:title" content="FrameScript — Turn video into a structured screenplay" />
+    <meta
+      property="og:description"
+      content="Evidence-driven screenplay reconstruction for local files and supported live playback."
+    />
+    <meta property="og:image" content="/icons/icon-512.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="FrameScript — Turn video into a structured screenplay" />
+    <meta
+      name="twitter:description"
+      content="Evidence-driven screenplay reconstruction for local files and supported live playback."
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" sizes="128x128" href="/icons/icon-128.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png" />
+    <title>FrameScript — Turn video into a structured screenplay</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript
+      >FrameScript Studio needs JavaScript to process local media and subtitle files.</noscript
+    >
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

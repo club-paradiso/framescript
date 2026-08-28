@@ -2,7 +2,7 @@
   "name": "FrameScript Studio",
   "short_name": "FrameScript",
   "description": "Reconstruct a screenplay from your own media and subtitle files. Everything runs on your device.",
-  "start_url": "/",
+  "start_url": "/studio",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
@@ -15,9 +15,23 @@
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
+  "shortcuts": [
+    {
+      "name": "Open Studio",
+      "short_name": "Studio",
+      "url": "/studio",
+      "icons": [{ "src": "/icons/icon-128.png", "sizes": "128x128" }]
+    },
+    {
+      "name": "Open a project",
+      "short_name": "View project",
+      "url": "/view",
+      "icons": [{ "src": "/icons/icon-128.png", "sizes": "128x128" }]
+    }
+  ],
   "file_handlers": [
     {
-      "action": "/",
+      "action": "/view",
       "accept": {
         "application/x-subrip": [".srt"],
         "text/vtt": [".vtt"],
