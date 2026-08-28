@@ -50,6 +50,20 @@ export interface OpenAiCompatibleAsrConfig {
 export const DEFAULT_ASR_SAMPLE_RATE = 16_000;
 export const DEFAULT_ASR_MAX_WINDOW_MS = 30_000;
 
+const LANGUAGE_ALIASES: Readonly<Record<string, string>> = {
+  en: 'en',
+  eng: 'en',
+  english: 'en',
+  ko: 'ko',
+  kor: 'ko',
+  korean: 'ko',
+  es: 'es',
+  spa: 'es',
+  spanish: 'es',
+  espanol: 'es',
+  español: 'es',
+};
+
 interface TranscriptionResponse {
   text?: string;
   language?: string;
@@ -68,6 +82,34 @@ export interface TranscribeWavRequest {
   signal?: AbortSignal;
   /** Injected in tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
+}
+
+/**
+ * Canonicalizes common provider language labels into stable BCP-47 primary
+ * language tags. Some transcription APIs return `english`/`korean`/`spanish`
+ * while others return `en`/`ko`/`es`; carrying those strings verbatim would
+ * split one language into several screenplay variants.
+ *
+ * An explicit language hint is the fallback when the provider omits language
+ * metadata. This is particularly useful for compatible endpoints that return
+ * only `{ text }` even though they accepted the hint correctly.
+ */
+export function normalizeAsrLanguage(
+  providerLanguage?: string,
+  languageHint?: string,
+): string | undefined {
+  for (const candidate of [providerLanguage, languageHint]) {
+    if (!candidate) continue;
+    const normalized = candidate.trim().toLocaleLowerCase().replace(/_/g, '-');
+    if (!normalized) continue;
+    const aliased = LANGUAGE_ALIASES[normalized];
+    if (aliased) return aliased;
+
+    const primary = normalized.split('-')[0];
+    if (!primary || !/^[a-z]{2,3}$/.test(primary)) continue;
+    return LANGUAGE_ALIASES[primary] ?? primary;
+  }
+  return undefined;
 }
 
 /**
@@ -115,9 +157,10 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
   // hold no words. It must produce no evidence rather than an empty line.
   if (!text && segments.length === 0) return null;
 
+  const language = normalizeAsrLanguage(json.language, request.languageHint);
   return {
     text: text || segments.map((segment) => segment.text).join(' ').trim(),
-    ...(typeof json.language === 'string' && json.language ? { language: json.language } : {}),
+    ...(language ? { language } : {}),
     ...(segments.length > 0 ? { segments } : {}),
   };
 }
