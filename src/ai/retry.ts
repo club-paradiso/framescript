@@ -10,7 +10,7 @@
  * code path here that can loop indefinitely.
  */
 
-import { FrameScriptError, type FrameScriptErrorCode } from '../utils/errors';
+import { FrameScriptError, type FrameScriptErrorCode } from '../utils/errors.js';
 
 export type ProviderKindForErrors = 'asr' | 'vision';
 
