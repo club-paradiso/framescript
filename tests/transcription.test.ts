@@ -336,8 +336,8 @@ describe('provider transport', () => {
   it('maps provider status codes onto typed, correctly retryable errors', async () => {
     const cases: [number, string, boolean][] = [
       [429, 'ASR_RATE_LIMITED', true],
-      [401, 'ASR_NOT_CONFIGURED', false],
-      [400, 'ASR_PROVIDER_FAILED', false],
+      [401, 'ASR_AUTH_FAILED', false],
+      [400, 'ASR_BAD_REQUEST', false],
       [503, 'ASR_PROVIDER_FAILED', true],
     ];
     for (const [status, code, retryable] of cases) {
