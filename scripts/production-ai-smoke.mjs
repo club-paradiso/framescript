@@ -135,7 +135,31 @@ async function checkVision() {
   console.log(`[production-ai-smoke] vision OK: HTTP ${response.status}, analysis=${analysisKind}`);
 }
 
+function safeFailure(error) {
+  if (!(error instanceof Error)) return 'unknown failure';
+  // Smoke errors are constructed only from HTTP status and FrameScript error
+  // code. Do not append arbitrary response bodies or provider payloads here.
+  return error.message.replace(/^\[production-ai-smoke\]\s*/, '');
+}
+
 await checkCapabilities();
-await checkTranscription();
-await checkVision();
+
+const failures = [];
+for (const [label, check] of [
+  ['transcription', checkTranscription],
+  ['vision', checkVision],
+]) {
+  try {
+    await check();
+  } catch (error) {
+    const message = safeFailure(error);
+    failures.push(`${label}: ${message}`);
+    console.error(`[production-ai-smoke] ${label} FAILED: ${message}`);
+  }
+}
+
+if (failures.length > 0) {
+  fail(`${failures.length} live inference check(s) failed: ${failures.join('; ')}`);
+}
+
 console.log('[production-ai-smoke] all production AI inference checks passed');
