@@ -49,7 +49,7 @@ describe('Vercel AI Gateway ASR configuration', () => {
       provider: 'vercel-ai-gateway',
       apiKey: 'oidc-test-token',
       gatewayAuthMethod: 'oidc',
-      model: 'fish-audio/transcribe-1',
+      model: 'openai/gpt-4o-transcribe',
     });
   });
 
@@ -70,7 +70,7 @@ describe('Vercel AI Gateway ASR configuration', () => {
       provider: 'vercel-ai-gateway',
       apiKey: 'request-context-token',
       gatewayAuthMethod: 'oidc',
-      model: 'fish-audio/transcribe-1',
+      model: 'openai/gpt-4o-transcribe',
     });
   });
 
@@ -158,7 +158,7 @@ describe('Vercel AI Gateway transcription transport', () => {
       expect(headers.get('authorization')).toBe('Bearer oidc-test-token');
       expect(headers.get('ai-gateway-protocol-version')).toBe('0.0.1');
       expect(headers.get('ai-gateway-auth-method')).toBe('oidc');
-      expect(headers.get('ai-model-id')).toBe('fish-audio/transcribe-1');
+      expect(headers.get('ai-model-id')).toBe('openai/gpt-4o-transcribe');
       expect(headers.get('ai-transcription-model-specification-version')).toBe('4');
       const body = JSON.parse(String(init?.body)) as { audio: string; mediaType: string };
       expect(body.mediaType).toBe('audio/wav');
@@ -185,7 +185,7 @@ describe('Vercel AI Gateway transcription transport', () => {
       endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
       token: 'oidc-test-token',
       authMethod: 'oidc',
-      model: 'fish-audio/transcribe-1',
+      model: 'openai/gpt-4o-transcribe',
       languageHint: 'ko',
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -204,7 +204,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
         authMethod: 'oidc',
-        model: 'fish-audio/transcribe-1',
+        model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () =>
           new Response(JSON.stringify({ type: 'invalid_request_error', statusCode: 400 }), {
             status: 400,
@@ -221,7 +221,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
         authMethod: 'oidc',
-        model: 'fish-audio/transcribe-1',
+        model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () =>
           new Response(JSON.stringify({ type: 'no_providers_available', statusCode: 403 }), {
             status: 403,
@@ -238,7 +238,7 @@ describe('Vercel AI Gateway transcription transport', () => {
         endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
         token: 'oidc-test-token',
         authMethod: 'oidc',
-        model: 'fish-audio/transcribe-1',
+        model: 'openai/gpt-4o-transcribe',
         fetchImpl: (async () => new Response('rate limited', { status: 429 })) as typeof fetch,
       }),
     ).rejects.toMatchObject({ code: 'ASR_RATE_LIMITED', recoverable: true });
