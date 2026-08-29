@@ -3,6 +3,11 @@
   "framework": "vite",
   "buildCommand": "npm run build:web",
   "outputDirectory": "dist-web",
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
   "rewrites": [
     {
       "source": "/((?!api/|assets/|icons/|manifest.webmanifest|sw.js).*)",
