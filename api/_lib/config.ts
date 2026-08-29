@@ -53,7 +53,13 @@ export const LIMITS = {
 
 const DEFAULT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
 const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcription-model';
-const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
+// OpenAI transcription currently reaches the provider through Gateway but is
+// rejected for this Vercel customer with `customer_verification_required`.
+// Fish Audio Transcribe 1 is a v4-compatible Gateway transcription model from
+// a different provider, so it avoids making FrameScript availability depend on
+// an unrelated OpenAI account-verification state. Operators can still override
+// this model explicitly once another route is preferable.
+const DEFAULT_GATEWAY_ASR_MODEL = 'fish-audio/transcribe-1';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 // GPT-5.6 Luna is still limited-preview and returned 403 for this deployment in
 // production. Gemini 3.5 Flash Lite is a generally routable multimodal model

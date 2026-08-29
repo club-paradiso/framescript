@@ -16,7 +16,7 @@ const origin = (process.env.FRAMESCRIPT_SMOKE_ORIGIN || 'https://framescript-eta
   /\/$/,
   '',
 );
-const expectedAsrModel = process.env.FRAMESCRIPT_SMOKE_ASR_MODEL || 'openai/gpt-4o-transcribe';
+const expectedAsrModel = process.env.FRAMESCRIPT_SMOKE_ASR_MODEL || 'fish-audio/transcribe-1';
 const expectedVisionModel =
   process.env.FRAMESCRIPT_SMOKE_VISION_MODEL || 'google/gemini-3.5-flash-lite';
 const expectedGitSha = process.env.FRAMESCRIPT_SMOKE_GIT_SHA || '';
