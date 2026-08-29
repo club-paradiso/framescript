@@ -38,7 +38,11 @@ jobs:
 
       - name: Exercise deployed ASR and vision
         env:
-          FRAMESCRIPT_SMOKE_ORIGIN: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.url || 'https://framescript-eta.vercel.app' }}
+          # The immutable deployment hostname may be protected even when the
+          # production aliases are public. Exercise the real public production
+          # surface and use /api/capabilities deployment identity to prove that
+          # the alias has already been promoted to the Vercel event's Git SHA.
+          FRAMESCRIPT_SMOKE_ORIGIN: https://framescript-eta.vercel.app
           FRAMESCRIPT_SMOKE_ASR_MODEL: openai/gpt-4o-transcribe
           FRAMESCRIPT_SMOKE_VISION_MODEL: google/gemini-3.5-flash-lite
           FRAMESCRIPT_SMOKE_GIT_SHA: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.git.sha || '' }}
