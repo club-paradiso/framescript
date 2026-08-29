@@ -11,6 +11,32 @@ describe('provider failure classification', () => {
     });
   });
 
+  it('treats Vercel customer verification as deployment-level model unavailability', async () => {
+    expect(
+      classifyHttpFailure(403, 'asr', { type: 'customer_verification_required' }),
+    ).toEqual({ code: 'ASR_MODEL_UNAVAILABLE', retryable: false });
+    expect(
+      classifyHttpFailure(403, 'vision', { code: 'customer_verification_required' }),
+    ).toEqual({ code: 'VISION_MODEL_UNAVAILABLE', retryable: false });
+
+    const error = await providerResponseError(
+      new Response(
+        JSON.stringify({
+          error: 'account verification text must not be retained',
+          type: 'customer_verification_required',
+          statusCode: 403,
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      ),
+      'asr',
+      'gateway=vercel model=example/transcribe',
+    );
+
+    expect(error).toMatchObject({ code: 'ASR_MODEL_UNAVAILABLE', recoverable: false });
+    expect(error.detail).toContain('type=customer_verification_required');
+    expect(error.detail).not.toContain('account verification text must not be retained');
+  });
+
   it('treats malformed provider requests as deterministic failures', () => {
     expect(classifyHttpFailure(400, 'asr')).toEqual({ code: 'ASR_BAD_REQUEST', retryable: false });
     expect(classifyHttpFailure(422, 'vision')).toEqual({
