@@ -38,8 +38,12 @@ function codeFor(kind: ProviderKindForErrors, suffix: string): FrameScriptErrorC
  * produced here; only the server-side config readers may emit it.
  *
  * Vercel AI Gateway uses 403 + `no_providers_available` when a team allowlist
- * blocks the requested model/provider, so a safe response hint lets us report
- * that as model availability rather than authentication.
+ * blocks the requested model/provider. It also uses 403 +
+ * `customer_verification_required` when the deployment's Vercel team must
+ * complete account verification before paid inference is permitted. Neither
+ * condition is fixed by retrying the same request or rotating model slugs, so
+ * both are represented as deployment-level model unavailability rather than a
+ * bad API credential.
  */
 export function classifyHttpFailure(
   status: number,
@@ -49,7 +53,11 @@ export function classifyHttpFailure(
   const failed = codeFor(kind, 'PROVIDER_FAILED');
   const normalizedType = hint.type?.trim().toLowerCase() ?? '';
   const normalizedCode = hint.code?.trim().toLowerCase() ?? '';
+  const verificationRequired =
+    normalizedType === 'customer_verification_required' ||
+    normalizedCode === 'customer_verification_required';
   const modelUnavailable =
+    verificationRequired ||
     normalizedType === 'no_providers_available' ||
     normalizedType.includes('model_not_found') ||
     normalizedCode.includes('model_not_found') ||
