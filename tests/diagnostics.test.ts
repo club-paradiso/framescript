@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDiagnostics,
+  describeAudioPipeline,
   formatDiagnostics,
   sanitizeFilename,
 } from '../web/src/analysis/diagnostics';
@@ -91,6 +92,11 @@ describe('diagnostics', () => {
     expect(report.analysis?.lastPhase).toBe('done');
     expect(report.analysis?.stats.speechRegions).toBe(18);
     expect(report.analysis?.requests.asr).toEqual({ attempted: 18, succeeded: 17, failed: 1 });
+    expect(report.analysis?.audioPipeline).toEqual({
+      decode: 'decoded',
+      speechAnalysis: 'completed',
+      transcription: { state: 'partial', attempted: 18, succeeded: 17, failed: 1 },
+    });
     expect(report.configuration.transcription).toMatchObject({
       configured: true,
       provider: 'openai-compatible',
@@ -99,6 +105,87 @@ describe('diagnostics', () => {
     expect(report.configuration.vision.configured).toBe(false);
     expect(report.media).toEqual({ durationMs: 177_870, width: 910, height: 512 });
     expect(report.file).toEqual({ name: 'clip.mp4', sizeBytes: 108_700_000, type: 'video/mp4' });
+  });
+
+  it('explains that ASR never ran when browser audio decoding failed', () => {
+    const failedDecode: AnalysisOutcome = {
+      ...outcome,
+      events: [],
+      stats: {
+        ...outcome.stats,
+        speechRegions: 0,
+        speakers: 0,
+        soundEvents: 0,
+        silences: 0,
+        speechWindowsPlanned: 0,
+        speechWindowsTranscribed: 0,
+        dialogueSegments: 0,
+      },
+      coverage: { ...outcome.coverage, audioDecoded: false, transcribedRatio: undefined },
+      notices: [
+        {
+          code: 'AUDIO_DECODE_UNSUPPORTED',
+          message: 'Unsupported audio.',
+          detail: 'EncodingError: Decoding failed',
+        },
+      ],
+      requests: {
+        ...outcome.requests,
+        asr: { attempted: 0, succeeded: 0, failed: 0 },
+      },
+    };
+
+    expect(describeAudioPipeline(failedDecode)).toEqual({
+      decode: 'unsupported',
+      speechAnalysis: 'not-run',
+      transcription: {
+        state: 'not-attempted-audio-unavailable',
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+      },
+    });
+
+    const report = buildDiagnostics({
+      version: '0.1.0',
+      file: { name: 'iphone.mov', size: 352_898_489, type: 'video/quicktime' },
+      media: { durationMs: 177_850, videoWidth: 1920, videoHeight: 1080 },
+      capabilities,
+      outcome: failedDecode,
+      environment,
+    });
+
+    expect(report.analysis?.audioPipeline.transcription.state).toBe(
+      'not-attempted-audio-unavailable',
+    );
+    expect(report.analysis?.notices[0]).toEqual({
+      code: 'AUDIO_DECODE_UNSUPPORTED',
+      detail: 'EncodingError: Decoding failed',
+    });
+  });
+
+  it('distinguishes decoded audio with no detected speech from a decode failure', () => {
+    const noSpeech: AnalysisOutcome = {
+      ...outcome,
+      events: [],
+      stats: {
+        ...outcome.stats,
+        speechRegions: 0,
+        speakers: 0,
+        speechWindowsPlanned: 0,
+        speechWindowsTranscribed: 0,
+        dialogueSegments: 0,
+      },
+      notices: [],
+      requests: {
+        ...outcome.requests,
+        asr: { attempted: 0, succeeded: 0, failed: 0 },
+      },
+    };
+
+    expect(describeAudioPipeline(noSpeech).transcription.state).toBe(
+      'not-attempted-no-speech',
+    );
   });
 
   it('carries no transcript, no evidence and no media bytes', () => {
