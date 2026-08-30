@@ -32,7 +32,6 @@ import type {
   OnScreenTextBeat,
   SceneBeat,
   SoundBeat,
-  TransitionBeat,
 } from './types';
 
 export interface FusionContext {
@@ -147,14 +146,12 @@ export function fuseWindow(window: EvidenceWindow, context: FusionContext): Fusi
 
   for (const visual of window.visualEvents) {
     if (visual.payload.kind === 'scene-change') {
-      const beat: TransitionBeat = {
-        type: 'transition',
-        id: nextId(),
-        start: visual.start,
-        label: 'CUT TO:',
-        provenance: provenanceFrom([visual]),
-      };
-      beats.push(beat);
+      // A detected picture cut is evidence for scene-boundary scoring, not an
+      // authored screenplay transition. Ordinary shot changes are intentionally
+      // silent here; the scene builder will start a new scene only when several
+      // independent boundary signals justify one. Editorial transitions such as
+      // CUT TO:, SMASH CUT TO:, MATCH CUT TO: or FADE OUT: require explicit,
+      // higher-level evidence rather than being fabricated from every camera cut.
       continue;
     }
     // A setting observation is the scene's heading, derived by the builder from
