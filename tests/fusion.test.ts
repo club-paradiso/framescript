@@ -291,12 +291,12 @@ describe('on-screen text fusion', () => {
   });
 });
 
-describe('transitions', () => {
-  it('emits a transition only where a cut was actually detected', () => {
+describe('shot cuts and screenplay transitions', () => {
+  it('keeps a detected camera cut as boundary evidence without inventing CUT TO', () => {
     const result = fuse([cut(2000), subtitle(3000, 4000, 'After the cut')]);
     const transitions = result.beats.filter((b) => b.type === 'transition');
-    expect(transitions).toHaveLength(1);
-    expect(transitions[0]!.start).toBe(2000);
+    expect(transitions).toHaveLength(0);
+    expect(result.beats.filter((b) => b.type === 'dialogue')).toHaveLength(1);
   });
 });
 
