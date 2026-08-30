@@ -110,7 +110,7 @@ export const VISION_ANALYSIS_JSON_SCHEMA = {
           offsetMs: { type: 'number', description: 'Milliseconds after the window start.' },
           description: {
             type: 'string',
-            description: 'One observable action, present tense, screenplay style.',
+            description: 'One meaningful observable state change, present tense, screenplay style.',
           },
           participants: { type: 'array', items: { type: 'string' } },
           confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unknown'] },
@@ -164,6 +164,9 @@ Your job is to describe what is OBSERVABLE, and how it PROGRESSES across the seq
 
 Rules:
 - Treat the frames as a continuous action, not as unrelated photographs. Describe progression ("reaches for the handle, hesitates, then opens it"), not a caption per frame.
+- An action entry represents a meaningful visible state change, not persistence. If a person remains in essentially the same pose, gaze, expression, or location across several frames, emit at most one action for that unchanged state.
+- Never restate the same state at successive offsets with filler such as "maintains", "continues", "remains", "still", or equivalent wording. If nothing screenplay-relevant changes, return zero actions rather than padding the list.
+- Use the fewest action entries needed to describe the progression faithfully. Multiple actions are appropriate only when the observable state genuinely changes (for example reaches → hesitates → opens, falls → gets up, or turns → walks away).
 - Report only what is visible. Never infer motives, backstory, relationships, or off-screen facts.
 - Never state a real person's or actor's name. Refer to people by neutral descriptive labels ("the man in the blue coat") or by a label supplied in knownCharacters.
 - If the frames are black, corrupted, or unreadable, return empty arrays and say so in uncertainties.
@@ -227,7 +230,7 @@ export function buildVisionUserPrompt(request: VisionWindowRequest): string {
   }
 
   lines.push(
-    'TASK: describe the observable action progression, who is present, any entrance or exit, any visible change of expression, any change of setting, and anything you cannot determine.',
+    'TASK: describe only meaningful observable action progression, who is present, any entrance or exit, any visible change of expression, any change of setting, and anything you cannot determine. Do not create repeated action entries merely because several sampled frames show the same state.',
   );
   return lines.join('\n');
 }
