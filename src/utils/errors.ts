@@ -112,11 +112,11 @@ const USER_MESSAGES: Record<FrameScriptErrorCode, string> = {
   AI_RESPONSE_INVALID:
     'The AI provider returned a response FrameScript could not verify, so it was discarded rather than guessed at.',
   NO_AUDIO_TRACK:
-    'This file has no audio track FrameScript can read, so there is no speech, speaker or sound evidence. Picture analysis still works.',
+    'This file has no audio track FrameScript can read. Speech detection and transcription were not run; picture analysis still works.',
   AUDIO_DECODE_UNSUPPORTED:
-    'Your browser cannot decode the audio track in this file. The picture may still be analyzable, and another browser may decode the audio.',
+    'Your browser cannot decode the audio track in this file. Speech detection and transcription were not run, but picture analysis can continue.',
   AUDIO_DECODE_FAILED:
-    'The audio track started decoding and then failed. Picture analysis can continue without it.',
+    'The audio track started decoding and then failed. Speech detection and transcription could not run; picture analysis can continue.',
   VIDEO_METADATA_FAILED:
     'The browser could not read this file’s video metadata, so duration and dimensions are unknown.',
   VIDEO_CODEC_UNSUPPORTED:
@@ -145,13 +145,13 @@ const USER_MESSAGES: Record<FrameScriptErrorCode, string> = {
   ASR_RESPONSE_INVALID:
     'The transcription service returned a response FrameScript could not verify, so it was discarded rather than guessed at.',
   VISION_NOT_CONFIGURED:
-    'Scene understanding is not configured, so the picture is described by motion and scene changes only.',
+    'Scene understanding is not configured, so the picture is described by motion and shot-change evidence only.',
   VISION_BAD_REQUEST:
-    'The scene-understanding service rejected the selected-frame request format. Local motion and scene-change evidence was preserved.',
+    'The scene-understanding service rejected the selected-frame request format. Local motion and shot-change evidence was preserved.',
   VISION_AUTH_FAILED:
-    'The scene-understanding service rejected FrameScript’s authentication. Local motion and scene-change evidence was preserved.',
+    'The scene-understanding service rejected FrameScript’s authentication. Local motion and shot-change evidence was preserved.',
   VISION_MODEL_UNAVAILABLE:
-    'The configured scene-understanding model or provider is unavailable to this deployment. Local motion and scene-change evidence was preserved.',
+    'The configured scene-understanding model or provider is unavailable to this deployment. Local motion and shot-change evidence was preserved.',
   VISION_PROVIDER_FAILED:
     'The scene-understanding service could not complete this request. Local picture evidence was kept.',
   VISION_RATE_LIMITED:
