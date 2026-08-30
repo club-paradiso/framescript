@@ -52,6 +52,10 @@ import {
   type KeyframeWindow,
 } from './localMediaAnalyzer';
 import { analyzeFrames, runBounded, transcribeWindow, type Capabilities } from './apiClient';
+import {
+  preferredSceneCaptureBudget,
+  selectSceneWindowsForAnalysis,
+} from './sceneWindowSelection';
 
 export type PhaseId =
   | 'reading'
@@ -373,9 +377,14 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
   let keyframeWindows: KeyframeWindow[] = [];
   if (options.analyzeVideo && options.video && !aborted()) {
     report('scanning', 0, `${options.scanRate}× scan`);
+    // Candidate capture and network request budgets are deliberately separate.
+    // Capturing only `maxSceneWindows` candidates caused short films to exhaust
+    // their semantic budget early and leave the rest of the timeline invisible
+    // to the vision model. Keep a bounded denser local pool, then choose the
+    // actual remote requests after the scan with temporal coverage guarantees.
     const wantsKeyframes =
       options.sceneUnderstanding && options.capabilities.vision.configured
-        ? options.maxSceneWindows
+        ? preferredSceneCaptureBudget(options.maxSceneWindows, durationMs)
         : 0;
 
     const scan = await scanVideoDuringPlayback(options.video, {
@@ -420,12 +429,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
 
   // --- Scene understanding -----------------------------------------------------
   if (keyframeWindows.length > 0 && !aborted()) {
-    // Most significant windows first, so a tight budget spends itself on the
-    // parts of the film the local scanner already judged most eventful.
-    const selected = [...keyframeWindows]
-      .sort((a, b) => b.importance - a.importance)
-      .slice(0, options.maxSceneWindows)
-      .sort((a, b) => a.start - b.start);
+    const selected = selectSceneWindowsForAnalysis(keyframeWindows, options.maxSceneWindows);
     stats.keyframeWindows = selected.length;
 
     let completed = 0;
