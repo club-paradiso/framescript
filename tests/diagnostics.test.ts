@@ -188,6 +188,65 @@ describe('diagnostics', () => {
     );
   });
 
+  it('does not call an interrupted transcription complete', () => {
+    const interrupted: AnalysisOutcome = {
+      ...outcome,
+      stats: {
+        ...outcome.stats,
+        speechWindowsPlanned: 18,
+        speechWindowsTranscribed: 0,
+        dialogueSegments: 0,
+      },
+      requests: {
+        ...outcome.requests,
+        asr: { attempted: 1, succeeded: 0, failed: 0 },
+      },
+      aborted: true,
+    };
+
+    expect(describeAudioPipeline(interrupted).transcription).toEqual({
+      state: 'partial',
+      attempted: 1,
+      succeeded: 0,
+      failed: 0,
+    });
+  });
+
+  it('derives unavailable transcription from the reported capabilities', () => {
+    const unavailableCapabilities: Capabilities = {
+      ...capabilities,
+      transcription: { configured: false, reason: 'No transcription provider configured.' },
+    };
+    const noAttempt: AnalysisOutcome = {
+      ...outcome,
+      events: [],
+      stats: {
+        ...outcome.stats,
+        speechWindowsPlanned: 0,
+        speechWindowsTranscribed: 0,
+        dialogueSegments: 0,
+      },
+      notices: [],
+      requests: {
+        ...outcome.requests,
+        asr: { attempted: 0, succeeded: 0, failed: 0 },
+      },
+    };
+
+    const report = buildDiagnostics({
+      version: '0.1.0',
+      file: { name: 'clip.mp4', size: 10, type: 'video/mp4' },
+      media: {},
+      capabilities: unavailableCapabilities,
+      outcome: noAttempt,
+      environment,
+    });
+
+    expect(report.analysis?.audioPipeline.transcription.state).toBe(
+      'not-attempted-not-configured',
+    );
+  });
+
   it('carries no transcript, no evidence and no media bytes', () => {
     const text = formatDiagnostics(
       buildDiagnostics({

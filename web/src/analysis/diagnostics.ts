@@ -99,7 +99,10 @@ export function sanitizeFilename(name: string): string {
  * transcript content. This turns otherwise confusing combinations such as
  * `speechRegions: 0` + `ASR attempted: 0` into an explicit causal state.
  */
-export function describeAudioPipeline(outcome: AnalysisOutcome): AudioPipelineDiagnostic {
+export function describeAudioPipeline(
+  outcome: AnalysisOutcome,
+  capabilities?: Capabilities,
+): AudioPipelineDiagnostic {
   const noticeCodes = new Set(outcome.notices.map((notice) => notice.code));
   let decode: AudioDecodeState;
 
@@ -111,16 +114,23 @@ export function describeAudioPipeline(outcome: AnalysisOutcome): AudioPipelineDi
   else decode = 'not-decoded';
 
   const { attempted, succeeded, failed } = outcome.requests.asr;
+  const planned = outcome.stats.speechWindowsPlanned;
+  const finished = succeeded + failed;
+  const incompleteAttempt = finished < attempted;
+  const incompletePlan = planned > finished;
   let state: AudioTranscriptionState;
   if (attempted > 0) {
     if (failed > 0 && succeeded === 0) state = 'failed';
-    else if (failed > 0) state = 'partial';
+    else if (failed > 0 || incompleteAttempt || incompletePlan) state = 'partial';
     else state = 'completed';
   } else if (decode !== 'decoded') {
     state = 'not-attempted-audio-unavailable';
   } else if (outcome.stats.speechRegions === 0) {
     state = 'not-attempted-no-speech';
-  } else if (noticeCodes.has('ASR_NOT_CONFIGURED')) {
+  } else if (
+    capabilities?.transcription.configured === false ||
+    noticeCodes.has('ASR_NOT_CONFIGURED')
+  ) {
     state = 'not-attempted-not-configured';
   } else {
     state = 'not-attempted';
@@ -219,7 +229,7 @@ export function buildDiagnostics(input: DiagnosticsInput): DiagnosticsReport {
       stats: input.outcome.stats,
       coverage: input.outcome.coverage,
       requests: input.outcome.requests,
-      audioPipeline: describeAudioPipeline(input.outcome),
+      audioPipeline: describeAudioPipeline(input.outcome, input.capabilities),
       notices: input.outcome.notices.map((notice) => {
         const detail = sanitizeDetail(notice.detail);
         return { code: notice.code, ...(detail ? { detail } : {}) };
