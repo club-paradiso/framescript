@@ -5,10 +5,10 @@
  * gesture (start analysis, open the screenplay). Everything else lives in the
  * side panel or the options page.
  *
- * Starting analysis MUST originate here or in the side panel, because
- * `chrome.tabCapture.getMediaStreamId` requires a user gesture — which is
- * exactly the property that guarantees FrameScript can never begin analyzing a
- * tab on its own.
+ * Starting analysis MUST originate here or in the side panel. The click grants
+ * the service worker access to request tab capture, which is exactly the
+ * property that guarantees FrameScript can never begin analyzing a tab on its
+ * own.
  */
 
 import { useMemo } from 'react';

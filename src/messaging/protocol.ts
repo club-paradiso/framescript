@@ -120,7 +120,7 @@ export type WorkerToContent =
 /** Sent by UI surfaces to the service worker. */
 export type UiToWorker =
   | Envelope<'ui/get-snapshot', { tabId?: number }>
-  | Envelope<'ui/start-analysis', { tabId: number; streamId?: string }>
+  | Envelope<'ui/start-analysis', { tabId: number }>
   | Envelope<'ui/stop-analysis', { tabId: number }>
   | Envelope<'ui/pause-analysis', { tabId: number }>
   | Envelope<'ui/resume-analysis', { tabId: number }>

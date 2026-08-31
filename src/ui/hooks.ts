@@ -175,9 +175,9 @@ export function useSession(tabId: number | undefined): SessionState {
 /**
  * Starts analysis.
  *
- * `getMediaStreamId` must be called from a user gesture, which is why this
- * lives in a click handler path and not in an effect. That constraint is also
- * the reason FrameScript can never begin analyzing a tab on its own.
+ * The message originates from a click handler so the service worker can use
+ * Chrome's user-invoked tab-capture grant. That constraint is also the reason
+ * FrameScript can never begin analyzing a tab on its own.
  */
 export function useAnalysisControls(tabId: number | undefined) {
   const [busy, setBusy] = useState(false);
@@ -188,15 +188,14 @@ export function useAnalysisControls(tabId: number | undefined) {
     setBusy(true);
     setError(null);
     try {
-      const streamId = await getMediaStreamId(tabId);
       const result = (await sendRuntime({
         type: 'ui/start-analysis',
-        payload: { tabId, streamId },
+        payload: { tabId },
       })) as { ok?: boolean; message?: string } | null;
       if (!result?.ok && result?.message) setError(result.message);
     } catch {
       setError(
-        'Chrome would not share this tab’s media. Start analysis from the FrameScript popup or side panel while the tab is active.',
+        'FrameScript could not start analysis. Reopen the popup or side panel while the video tab is active and try again.',
       );
     } finally {
       setBusy(false);
@@ -229,27 +228,6 @@ export function useAnalysisControls(tabId: number | undefined) {
   );
 
   return { start, stop, pause, resume, seek, busy, error };
-}
-
-/**
- * Promisified `chrome.tabCapture.getMediaStreamId`.
- *
- * Written against the callback form because the promise overload is not present
- * in every Chrome/type version, and this call must not silently resolve to
- * `undefined` — an undefined stream id would start "analysis" that captures
- * nothing.
- */
-function getMediaStreamId(tabId: number): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
-    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (streamId) => {
-      const error = chrome.runtime.lastError;
-      if (error || !streamId) {
-        reject(new Error(error?.message ?? 'No stream id returned'));
-        return;
-      }
-      resolve(streamId);
-    });
-  });
 }
 
 /** Applies theme and font-scale settings to the document root. */

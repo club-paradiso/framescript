@@ -25,6 +25,7 @@ import { exportScreenplay, type ExportFormat } from '../screenplay/export';
 import { screenplayRepository } from '../storage/repository';
 import { screenplayId } from '../storage/schema';
 import type { ReconstructedScene } from '../scenes/types';
+import { requestTabCaptureStreamId } from './tabCapture';
 
 const OFFSCREEN_PATH = 'offscreen/offscreen.html';
 const sessions = new SessionManager();
@@ -133,19 +134,9 @@ async function pushMediaTime(session: AnalysisSession): Promise<void> {
 
 // --- Analysis control ----------------------------------------------------------
 
-async function startAnalysis(
-  tabId: number,
-  streamId: string | undefined,
-): Promise<{ ok: boolean; message?: string }> {
+async function startAnalysis(tabId: number): Promise<{ ok: boolean; message?: string }> {
   const settings = await settingsStore.get();
   const session = await ensureSession(tabId);
-
-  if (!streamId) {
-    const message = userMessageFor('TAB_CAPTURE_FAILED');
-    session.setPhase('error', message);
-    broadcast({ type: 'worker/analysis-status', payload: session.status() });
-    return { ok: false, message };
-  }
 
   session.setPhase('starting');
   broadcast({ type: 'worker/analysis-status', payload: session.status() });
@@ -164,6 +155,28 @@ async function startAnalysis(
     session.setPhase('error', message);
     broadcast({ type: 'worker/analysis-status', payload: session.status() });
     return { ok: false, message };
+  }
+
+  let streamId: string;
+  try {
+    // Chrome documents the service-worker → offscreen path for MV3 tab
+    // capture. Request the short-lived id only after the offscreen document is
+    // ready so it can be consumed immediately.
+    streamId = await requestTabCaptureStreamId(tabId);
+  } catch (err) {
+    const message = userMessageFor('TAB_CAPTURE_FAILED');
+    console.error('[FrameScript] tab capture request failed:', errorDetail(err));
+    // Subtitle observation already started and needs no media permission.
+    session.setPhase(settings.analysis.sources.subtitles ? 'running' : 'error', message);
+    broadcast({ type: 'worker/analysis-status', payload: session.status() });
+    broadcast({
+      type: 'worker/notice',
+      payload: { code: 'TAB_CAPTURE_FAILED', message, severity: 'warning' },
+    });
+    if (!settings.analysis.sources.subtitles && sessions.activeCount === 0) {
+      await closeOffscreen();
+    }
+    return { ok: settings.analysis.sources.subtitles, message };
   }
 
   const response = (await sendRuntime({
@@ -346,7 +359,7 @@ async function handleUiMessage(message: UiToWorker): Promise<unknown> {
     }
 
     case 'ui/start-analysis':
-      return startAnalysis(message.payload.tabId, message.payload.streamId);
+      return startAnalysis(message.payload.tabId);
 
     case 'ui/stop-analysis':
       await stopAnalysis(message.payload.tabId);

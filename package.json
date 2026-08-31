@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "pretest:e2e": "npm run build && npm run build:web",
     "test:e2e": "playwright test",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build:all",
     "build:tools": "FS_TOOL_ENTRY=cli vite build --config vite.tools.config.ts && FS_TOOL_ENTRY=mcp vite build --config vite.tools.config.ts",
