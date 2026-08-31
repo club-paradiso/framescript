@@ -28,6 +28,34 @@ export interface DiagnosticsInput {
   environment?: { userAgent: string; platform: string; deviceMemory?: number };
 }
 
+export type AudioDecodeState =
+  | 'decoded'
+  | 'no-audio-track'
+  | 'unsupported'
+  | 'failed'
+  | 'memory-pressure'
+  | 'not-decoded';
+
+export type AudioTranscriptionState =
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'not-attempted-audio-unavailable'
+  | 'not-attempted-no-speech'
+  | 'not-attempted-not-configured'
+  | 'not-attempted';
+
+export interface AudioPipelineDiagnostic {
+  decode: AudioDecodeState;
+  speechAnalysis: 'completed' | 'not-run';
+  transcription: {
+    state: AudioTranscriptionState;
+    attempted: number;
+    succeeded: number;
+    failed: number;
+  };
+}
+
 export interface DiagnosticsReport {
   frameScript: string;
   generatedAt: string;
@@ -45,6 +73,7 @@ export interface DiagnosticsReport {
     stats: AnalysisOutcome['stats'];
     coverage: AnalysisOutcome['coverage'];
     requests: AnalysisOutcome['requests'];
+    audioPipeline: AudioPipelineDiagnostic;
     notices: { code: string; detail?: string }[];
   };
 }
@@ -63,6 +92,55 @@ export function sanitizeFilename(name: string): string {
     .join('')
     .trim();
   return cleaned.length > 120 ? `${cleaned.slice(0, 117)}…` : cleaned;
+}
+
+/**
+ * Explain exactly how far the audio pipeline got without exposing any audio or
+ * transcript content. This turns otherwise confusing combinations such as
+ * `speechRegions: 0` + `ASR attempted: 0` into an explicit causal state.
+ */
+export function describeAudioPipeline(
+  outcome: AnalysisOutcome,
+  capabilities?: Capabilities,
+): AudioPipelineDiagnostic {
+  const noticeCodes = new Set(outcome.notices.map((notice) => notice.code));
+  let decode: AudioDecodeState;
+
+  if (outcome.coverage.audioDecoded) decode = 'decoded';
+  else if (noticeCodes.has('NO_AUDIO_TRACK')) decode = 'no-audio-track';
+  else if (noticeCodes.has('AUDIO_DECODE_UNSUPPORTED')) decode = 'unsupported';
+  else if (noticeCodes.has('AUDIO_DECODE_FAILED')) decode = 'failed';
+  else if (noticeCodes.has('MEMORY_PRESSURE')) decode = 'memory-pressure';
+  else decode = 'not-decoded';
+
+  const { attempted, succeeded, failed } = outcome.requests.asr;
+  const planned = outcome.stats.speechWindowsPlanned;
+  const finished = succeeded + failed;
+  const incompleteAttempt = finished < attempted;
+  const incompletePlan = planned > finished;
+  let state: AudioTranscriptionState;
+  if (attempted > 0) {
+    if (failed > 0 && succeeded === 0) state = 'failed';
+    else if (failed > 0 || incompleteAttempt || incompletePlan) state = 'partial';
+    else state = 'completed';
+  } else if (decode !== 'decoded') {
+    state = 'not-attempted-audio-unavailable';
+  } else if (outcome.stats.speechRegions === 0) {
+    state = 'not-attempted-no-speech';
+  } else if (
+    capabilities?.transcription.configured === false ||
+    noticeCodes.has('ASR_NOT_CONFIGURED')
+  ) {
+    state = 'not-attempted-not-configured';
+  } else {
+    state = 'not-attempted';
+  }
+
+  return {
+    decode,
+    speechAnalysis: decode === 'decoded' ? 'completed' : 'not-run',
+    transcription: { state, attempted, succeeded, failed },
+  };
 }
 
 /**
@@ -151,6 +229,7 @@ export function buildDiagnostics(input: DiagnosticsInput): DiagnosticsReport {
       stats: input.outcome.stats,
       coverage: input.outcome.coverage,
       requests: input.outcome.requests,
+      audioPipeline: describeAudioPipeline(input.outcome, input.capabilities),
       notices: input.outcome.notices.map((notice) => {
         const detail = sanitizeDetail(notice.detail);
         return { code: notice.code, ...(detail ? { detail } : {}) };

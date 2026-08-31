@@ -28,7 +28,11 @@ import {
   type AnalysisOutcome,
   type AnalysisProgress,
 } from '../analysis/runAnalysis';
-import { buildDiagnostics, formatDiagnostics } from '../analysis/diagnostics';
+import {
+  buildDiagnostics,
+  describeAudioPipeline,
+  formatDiagnostics,
+} from '../analysis/diagnostics';
 
 const APP_VERSION = '0.1.0';
 /** Scene-understanding budgets. Separate from local fidelity, on purpose. */
@@ -267,7 +271,7 @@ export function MediaAnalyzer({
               disabled={running}
               onChange={(e) => setAnalyzeVideo(e.target.checked)}
             />
-            <span>Picture — motion and scene changes</span>
+            <span>Picture — motion and shot cuts</span>
           </label>
         )}
         <label className="check">
@@ -324,7 +328,7 @@ export function MediaAnalyzer({
             disabled={running || !canSeeScenes}
             onChange={(e) => setSceneDepth(e.target.value as SceneDepth)}
           >
-            <option value="off">Off — local motion and cuts only</option>
+            <option value="off">Off — local motion and shot cuts only</option>
             <option value="key">Key scenes — up to 6 selected windows</option>
             <option value="extended">Extended — up to 12 selected windows</option>
           </select>
@@ -399,9 +403,9 @@ export function MediaAnalyzer({
       )}
 
       <p className="muted small">
-        Speech detection, speaker clustering, sound, silence, motion and scene changes all run on
-        this device. Dialogue text and scene descriptions require a model: when this deployment has
-        one configured, only the detected speech windows and the selected keyframes are sent to this
+        Speech detection, speaker clustering, sound, silence, motion and shot cuts all run on this
+        device. Dialogue text and scene descriptions require a model: when this deployment has one
+        configured, only the detected speech windows and the selected keyframes are sent to this
         site’s own endpoint. The media file itself is never uploaded.
       </p>
     </section>
@@ -441,23 +445,34 @@ function Capability({
 function summaryLines(outcome: AnalysisOutcome): string[] {
   const lines: string[] = [];
   const { stats, coverage } = outcome;
+  const audioPipeline = describeAudioPipeline(outcome);
 
   if (coverage.audioDecoded) {
     lines.push(`${stats.speechRegions} speech regions`);
     lines.push(`${stats.speakers} speaker clusters`);
     if (stats.soundEvents > 0) lines.push(`${stats.soundEvents} sound events`);
+  } else if (audioPipeline.decode === 'unsupported') {
+    lines.push('Audio decode unsupported in this browser; speech detection and transcription did not run');
+  } else if (audioPipeline.decode === 'failed') {
+    lines.push('Audio decoding failed; speech detection and transcription did not run');
+  } else if (audioPipeline.decode === 'no-audio-track') {
+    lines.push('No readable audio track; speech detection and transcription did not run');
+  } else if (audioPipeline.decode === 'memory-pressure') {
+    lines.push('Audio could not be decoded because of browser memory pressure');
   } else {
     lines.push('No audio analyzed');
   }
 
-  if (stats.speechWindowsPlanned > 0) {
+  if (audioPipeline.transcription.state === 'not-attempted-no-speech') {
+    lines.push('No speech detected; transcription was not attempted');
+  } else if (stats.speechWindowsPlanned > 0) {
     lines.push(
       `${stats.dialogueSegments} transcribed dialogue segments from ${stats.speechWindowsTranscribed} of ${stats.speechWindowsPlanned} speech windows`,
     );
   }
   if (stats.observations > 0) {
     lines.push(`${stats.observations} picture observations`);
-    lines.push(`${stats.sceneCuts} scene changes`);
+    lines.push(`${stats.sceneCuts} shot cuts`);
   }
   if (stats.keyframeWindows > 0) {
     lines.push(

@@ -115,7 +115,7 @@ test('reports transcription as unavailable when the deployment has no provider',
 
   // Local structural evidence still arrives, and no dialogue is invented.
   await expect(summary().getByText(/speech regions/)).toBeVisible();
-  await expect(summary().getByText(/scene changes/)).toBeVisible();
+  await expect(summary().getByText(/shot cuts/)).toBeVisible();
   expect(await page.locator('.line--dialogue').count()).toBe(0);
 });
 
@@ -134,7 +134,7 @@ test('transcribes a subtitle-free MP4 into attributed screenplay dialogue', asyn
   await expect(summary().getByText('Analysis complete')).toBeVisible({ timeout: ANALYSIS_TIMEOUT });
 
   // 1-8: metadata, audio decode, speech regions, speakers, transcription,
-  // picture scan, scene changes — all reported as measured counts.
+  // picture scan and shot cuts — all reported as measured counts.
   await expect(analyzer().getByText(/\d+ speech regions/)).toBeVisible();
   await expect(analyzer().getByText(/\d+ speaker clusters/)).toBeVisible();
   await expect(summary().getByText(/transcribed dialogue segments/)).toBeVisible();
@@ -189,7 +189,7 @@ test('keeps every other source when the provider rate limits the run', async () 
   // The failure is named, and the run is not stuck or discarded.
   await expect(summary().getByText(/rate limiting this analysis/i)).toBeVisible();
   await expect(analyzer().getByText(/\d+ speech regions/)).toBeVisible();
-  await expect(summary().getByText(/scene changes/)).toBeVisible();
+  await expect(summary().getByText(/shot cuts/)).toBeVisible();
   expect(await page.locator('.line--dialogue').count()).toBe(0);
 
   // It gave up rather than retrying into the wall for every window.
