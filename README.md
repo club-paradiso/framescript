@@ -171,7 +171,7 @@ npm run lint        # eslint, zero warnings tolerated
 npm test            # vitest unit and regression suite
 npm run verify      # typecheck + lint + test + build
 npm run build:all   # extension + Studio + CLI/MCP
-npm run test:e2e    # Playwright production flows in real Chrome
+npm run test:e2e    # build extension + Studio, then run Playwright production flows
 npm run check:mcp   # MCP server over its real stdio transport
 npm run benchmark   # engine throughput + structural invariants
 npm run fixtures    # regenerate the synthetic media fixtures

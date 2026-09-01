@@ -7,7 +7,7 @@
 
 import { test, expect, chromium, type BrowserContext, type Worker } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -51,6 +51,16 @@ test.afterAll(async () => {
 
 test('the service worker registers', () => {
   expect(extensionId).toMatch(/^[a-z]{32}$/);
+});
+
+test('tab capture is requested by the service worker, not a transient UI page', () => {
+  const worker = readFileSync(join(EXTENSION_PATH, 'background/serviceWorker.js'), 'utf8');
+  const popup = readFileSync(join(EXTENSION_PATH, 'assets/popup.js'), 'utf8');
+  const sidePanel = readFileSync(join(EXTENSION_PATH, 'assets/sidepanel.js'), 'utf8');
+
+  expect(worker).toContain('getMediaStreamId');
+  expect(popup).not.toContain('getMediaStreamId');
+  expect(sidePanel).not.toContain('getMediaStreamId');
 });
 
 test('the popup renders and offers to open the screenplay', async () => {

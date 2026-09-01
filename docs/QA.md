@@ -9,14 +9,14 @@ by hand that fails on its own.
 npm run verify        # typecheck, lint, unit tests, all three builds
 npm run check:mcp     # MCP server over its real stdio transport
 npm run benchmark     # engine throughput + structural invariants
-npx playwright test   # extension and production-build Studio flows
+npm run test:e2e      # builds extension + Studio, then runs their production flows
 ```
 
 If the environment already ships a Chromium that Playwright did not install,
 point at it rather than downloading another:
 
 ```bash
-PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npx playwright test
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome npm run test:e2e
 ```
 
 ## What it cannot cover
