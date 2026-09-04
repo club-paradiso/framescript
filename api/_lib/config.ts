@@ -60,11 +60,13 @@ const DEFAULT_GATEWAY_ASR_ENDPOINT = 'https://ai-gateway.vercel.sh/v4/ai/transcr
 // operators can still override this model explicitly when appropriate.
 const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
-// GPT-5.6 Luna is still limited-preview and returned 403 for this deployment in
-// production. Gemini 3.5 Flash Lite is a generally routable multimodal model
-// with both Google and Vertex endpoints, so it is the safer default. Operators
-// can still opt into Luna (or any later model) through the environment override.
+// Gemini 3.5 Flash Lite remains the no-key Gateway fallback for deployments that
+// do not opt into OpenRouter. When OPENROUTER_API_KEY is present, FrameScript
+// deliberately prefers the free-only OpenRouter path below and never silently
+// falls back from it to a paid model.
 const DEFAULT_GATEWAY_VISION_MODEL = 'google/gemini-3.5-flash-lite';
+const DEFAULT_OPENROUTER_VISION_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const DEFAULT_OPENROUTER_VISION_MODEL = 'minimax/minimax-m3:free';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const VERCEL_REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
 
@@ -84,6 +86,10 @@ interface GatewayCredential {
 function env(name: string): string {
   const value = process.env[name];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isFreeOpenRouterModel(model: string): boolean {
+  return model.endsWith(':free') || model === 'openrouter/free';
 }
 
 /**
@@ -171,6 +177,27 @@ export function readVisionConfig(): VisionConfig | { error: string } {
     return { provider, endpoint, apiKey: explicitApiKey, model };
   }
 
+  // A dedicated OpenRouter key opts vision into a hard-free path. The selected
+  // model must be a `:free` slug (or the `openrouter/free` router), which prevents
+  // a typo or later environment edit from silently turning scene analysis into a
+  // billable workload. There is intentionally no paid fallback from this path.
+  const openRouterApiKey = env('OPENROUTER_API_KEY');
+  if (openRouterApiKey) {
+    const model = env('FRAMESCRIPT_OPENROUTER_VISION_MODEL') || DEFAULT_OPENROUTER_VISION_MODEL;
+    if (!isFreeOpenRouterModel(model)) {
+      return {
+        error:
+          'FRAMESCRIPT_OPENROUTER_VISION_MODEL must use a :free model (or openrouter/free) when OPENROUTER_API_KEY is configured.',
+      };
+    }
+    return {
+      provider: 'openai-compatible',
+      endpoint: DEFAULT_OPENROUTER_VISION_ENDPOINT,
+      apiKey: openRouterApiKey,
+      model,
+    };
+  }
+
   // Reuse the same short-lived deployment credential as transcription. The
   // Gateway's OpenAI-compatible chat endpoint accepts image data URLs, which is
   // exactly the wire format FrameScript's existing vision adapter already uses.
@@ -187,7 +214,7 @@ export function readVisionConfig(): VisionConfig | { error: string } {
 
   return {
     error:
-      'No vision credential is available. Set FRAMESCRIPT_VISION_API_KEY, or deploy on Vercel with AI Gateway OIDC enabled.',
+      'No vision credential is available. Set FRAMESCRIPT_VISION_API_KEY, OPENROUTER_API_KEY, or deploy on Vercel with AI Gateway OIDC enabled.',
   };
 }
 

@@ -12,6 +12,8 @@ const originalVisionProvider = process.env.FRAMESCRIPT_VISION_PROVIDER;
 const originalVisionEndpoint = process.env.FRAMESCRIPT_VISION_ENDPOINT;
 const originalVisionModel = process.env.FRAMESCRIPT_VISION_MODEL;
 const originalGatewayVisionModel = process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL;
+const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
+const originalOpenRouterVisionModel = process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
 const requestContextSymbol = Symbol.for('@vercel/request-context');
 const originalRequestContext = (
   globalThis as typeof globalThis & {
@@ -30,6 +32,8 @@ afterEach(() => {
   restore('FRAMESCRIPT_VISION_ENDPOINT', originalVisionEndpoint);
   restore('FRAMESCRIPT_VISION_MODEL', originalVisionModel);
   restore('FRAMESCRIPT_GATEWAY_VISION_MODEL', originalGatewayVisionModel);
+  restore('OPENROUTER_API_KEY', originalOpenRouterKey);
+  restore('FRAMESCRIPT_OPENROUTER_VISION_MODEL', originalOpenRouterVisionModel);
 
   const runtime = globalThis as typeof globalThis & {
     [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
@@ -102,6 +106,7 @@ describe('Vercel AI Gateway ASR configuration', () => {
 describe('Vercel AI Gateway vision configuration', () => {
   it('uses the per-request Vercel OIDC context when no long-lived vision key exists', () => {
     delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     delete process.env.AI_GATEWAY_API_KEY;
     delete process.env.VERCEL_OIDC_TOKEN;
     delete process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL;
@@ -122,8 +127,34 @@ describe('Vercel AI Gateway vision configuration', () => {
     });
   });
 
-  it('supports overriding only the Gateway vision model', () => {
+  it('prefers the hard-free OpenRouter path when an OpenRouter key is configured', () => {
     delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    delete process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'openai-compatible',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      apiKey: 'openrouter-key',
+      model: 'minimax/minimax-m3:free',
+    });
+  });
+
+  it('rejects paid OpenRouter vision models when the hard-free path is enabled', () => {
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL = 'openai/gpt-5.6-luna';
+
+    expect(readVisionConfig()).toEqual({
+      error:
+        'FRAMESCRIPT_OPENROUTER_VISION_MODEL must use a :free model (or openrouter/free) when OPENROUTER_API_KEY is configured.',
+    });
+  });
+
+  it('supports overriding only the Gateway vision model when OpenRouter is absent', () => {
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     process.env.AI_GATEWAY_API_KEY = 'gateway-key';
     process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL = 'openai/gpt-5.6-luna';
 
@@ -137,6 +168,7 @@ describe('Vercel AI Gateway vision configuration', () => {
 
   it('keeps an explicitly configured vision provider authoritative', () => {
     process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
     process.env.FRAMESCRIPT_VISION_PROVIDER = 'openai-compatible';
     process.env.FRAMESCRIPT_VISION_API_KEY = 'explicit-vision-key';
     process.env.FRAMESCRIPT_VISION_ENDPOINT = 'https://example.test/v1/chat/completions';
