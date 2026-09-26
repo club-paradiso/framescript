@@ -62,9 +62,9 @@ const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 // Keep the historical Gateway fallback for local/non-production environments.
 const DEFAULT_GATEWAY_VISION_MODEL = 'google/gemini-3.5-flash-lite';
-// Vercel currently exposes MiniMax M3 as a free multimodal model. Production
-// deliberately hard-pins to this slug so stale FRAMESCRIPT_VISION_* variables
-// cannot silently re-enable billable scene-analysis traffic.
+// Vercel exposes a dedicated zero-cost MiniMax M3 SKU. Production deliberately
+// hard-pins to the -free slug so the separate billable base model can never be
+// selected by stale FRAMESCRIPT_VISION_* variables.
 const PRODUCTION_FREE_GATEWAY_VISION_MODEL = 'minimax/minimax-m3-free';
 const DEFAULT_OPENROUTER_VISION_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_OPENROUTER_VISION_MODEL = 'minimax/minimax-m3:free';
