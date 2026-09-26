@@ -62,10 +62,10 @@ const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 // Keep the historical Gateway fallback for local/non-production environments.
 const DEFAULT_GATEWAY_VISION_MODEL = 'google/gemini-3.5-flash-lite';
-// Vercel currently exposes MiniMax M3 as a free multimodal model. Production
-// deliberately hard-pins to this slug so stale FRAMESCRIPT_VISION_* variables
-// cannot silently re-enable billable scene-analysis traffic.
-const PRODUCTION_FREE_GATEWAY_VISION_MODEL = 'minimax/minimax-m3';
+// Vercel exposes a dedicated zero-cost MiniMax M3 SKU. Production deliberately
+// hard-pins to the -free slug so the separate billable base model can never be
+// selected by stale FRAMESCRIPT_VISION_* variables.
+const PRODUCTION_FREE_GATEWAY_VISION_MODEL = 'minimax/minimax-m3-free';
 const DEFAULT_OPENROUTER_VISION_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_OPENROUTER_VISION_MODEL = 'minimax/minimax-m3:free';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
@@ -91,6 +91,23 @@ function env(name: string): string {
 
 function isFreeOpenRouterModel(model: string): boolean {
   return model.endsWith(':free') || model === 'openrouter/free';
+}
+
+/**
+ * Vercel AI Gateway uses creator/model identifiers, while OpenAI's own
+ * transcription endpoint expects OpenAI model ids without that namespace.
+ * Normalize only for the canonical OpenAI host so compatible/self-hosted
+ * endpoints retain their configured model string verbatim.
+ */
+function normalizeDirectOpenAiAsrModel(endpoint: string, model: string): string {
+  try {
+    if (new URL(endpoint).hostname === 'api.openai.com' && model.startsWith('openai/')) {
+      return model.slice('openai/'.length);
+    }
+  } catch {
+    // Endpoint validation belongs to fetch; preserve the configured model here.
+  }
+  return model;
 }
 
 /**
@@ -129,12 +146,14 @@ export function readAsrConfig(): AsrConfig | { error: string } {
     if (provider !== 'openai-compatible') {
       return { error: `Unsupported FRAMESCRIPT_ASR_PROVIDER "${provider}".` };
     }
-    const model = env('FRAMESCRIPT_ASR_MODEL');
-    if (!model) return { error: 'FRAMESCRIPT_ASR_MODEL is not set.' };
+    const configuredModel = env('FRAMESCRIPT_ASR_MODEL');
+    if (!configuredModel) return { error: 'FRAMESCRIPT_ASR_MODEL is not set.' };
+    const endpoint = env('FRAMESCRIPT_ASR_ENDPOINT') || DEFAULT_ASR_ENDPOINT;
+    const model = normalizeDirectOpenAiAsrModel(endpoint, configuredModel);
 
     return {
       provider,
-      endpoint: env('FRAMESCRIPT_ASR_ENDPOINT') || DEFAULT_ASR_ENDPOINT,
+      endpoint,
       apiKey: explicitApiKey,
       model,
     };

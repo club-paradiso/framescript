@@ -49,8 +49,8 @@ jobs:
           FRAMESCRIPT_SMOKE_ORIGIN: https://framescript-eta.vercel.app
           FRAMESCRIPT_SMOKE_ASR_PROVIDERS: vercel-ai-gateway,openai-compatible
           FRAMESCRIPT_SMOKE_VISION_PROVIDERS: vercel-ai-gateway
-          FRAMESCRIPT_SMOKE_ASR_MODEL: openai/gpt-4o-transcribe
-          FRAMESCRIPT_SMOKE_VISION_MODEL: minimax/minimax-m3
+          FRAMESCRIPT_SMOKE_ASR_MODELS: openai/gpt-4o-transcribe,gpt-4o-transcribe
+          FRAMESCRIPT_SMOKE_VISION_MODELS: minimax/minimax-m3-free
           FRAMESCRIPT_SMOKE_GIT_SHA: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.git.sha || '' }}
           FRAMESCRIPT_SMOKE_ENVIRONMENT: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.environment || '' }}
         run: node scripts/production-ai-smoke.mjs

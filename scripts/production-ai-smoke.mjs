@@ -16,13 +16,10 @@ const origin = (process.env.FRAMESCRIPT_SMOKE_ORIGIN || 'https://framescript-eta
   /\/$/,
   '',
 );
-const expectedAsrModel = process.env.FRAMESCRIPT_SMOKE_ASR_MODEL || 'openai/gpt-4o-transcribe';
-const expectedVisionModel =
-  process.env.FRAMESCRIPT_SMOKE_VISION_MODEL || 'minimax/minimax-m3';
 const expectedGitSha = process.env.FRAMESCRIPT_SMOKE_GIT_SHA || '';
 const expectedEnvironment = process.env.FRAMESCRIPT_SMOKE_ENVIRONMENT || '';
 
-function parseProviderAllowlist(value, fallback) {
+function parseAllowlist(value, fallback) {
   return new Set(
     (value || fallback)
       .split(',')
@@ -31,13 +28,21 @@ function parseProviderAllowlist(value, fallback) {
   );
 }
 
-const allowedAsrProviders = parseProviderAllowlist(
+const allowedAsrProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_ASR_PROVIDERS,
   'vercel-ai-gateway,openai-compatible',
 );
-const allowedVisionProviders = parseProviderAllowlist(
+const allowedVisionProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_VISION_PROVIDERS,
   'vercel-ai-gateway',
+);
+const allowedAsrModels = parseAllowlist(
+  process.env.FRAMESCRIPT_SMOKE_ASR_MODELS,
+  'openai/gpt-4o-transcribe,gpt-4o-transcribe',
+);
+const allowedVisionModels = parseAllowlist(
+  process.env.FRAMESCRIPT_SMOKE_VISION_MODELS,
+  'minimax/minimax-m3-free',
 );
 
 const PIXEL_PNG =
@@ -77,10 +82,10 @@ async function checkCapabilities() {
   if (!allowedVisionProviders.has(body.vision.provider)) {
     fail(`unexpected vision provider ${String(body.vision.provider)}`);
   }
-  if (body.transcription.model !== expectedAsrModel) {
+  if (!allowedAsrModels.has(body.transcription.model)) {
     fail(`unexpected ASR model ${String(body.transcription.model)}`);
   }
-  if (body.vision.model !== expectedVisionModel) {
+  if (!allowedVisionModels.has(body.vision.model)) {
     fail(`unexpected vision model ${String(body.vision.model)}`);
   }
   if (expectedGitSha && body?.deployment?.commitSha !== expectedGitSha) {

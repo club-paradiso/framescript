@@ -333,6 +333,28 @@ describe('provider transport', () => {
     expect(result?.segments).toEqual([{ startMs: 0, endMs: 1_250, text: 'Hello there.' }]);
   });
 
+  it('uses json by default for GPT-4o transcription models', async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      expect(form.get('model')).toBe('gpt-4o-transcribe');
+      expect(form.get('response_format')).toBe('json');
+      return new Response(JSON.stringify({ text: 'Hello there.' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    const result = await transcribeWav({
+      wav: wavFor(1),
+      endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      apiKey: 'test-key',
+      model: 'gpt-4o-transcribe',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    expect(result?.text).toBe('Hello there.');
+  });
+
   it('maps provider status codes onto typed, correctly retryable errors', async () => {
     const cases: [number, string, boolean][] = [
       [429, 'ASR_RATE_LIMITED', true],
