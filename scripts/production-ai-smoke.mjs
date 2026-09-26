@@ -4,9 +4,9 @@
  *
  * This deliberately uses only repository-generated/synthetic media. It sends
  * one bounded WAV fixture and one 1x1 PNG through FrameScript's public
- * production endpoints and verifies the complete server -> Vercel AI Gateway
- * -> provider -> FrameScript response path. No user media or credentials are
- * involved, and response content is never printed.
+ * production endpoints and verifies the complete server -> provider ->
+ * FrameScript response path. No user media or credentials are involved, and
+ * response content is never printed.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -18,9 +18,27 @@ const origin = (process.env.FRAMESCRIPT_SMOKE_ORIGIN || 'https://framescript-eta
 );
 const expectedAsrModel = process.env.FRAMESCRIPT_SMOKE_ASR_MODEL || 'openai/gpt-4o-transcribe';
 const expectedVisionModel =
-  process.env.FRAMESCRIPT_SMOKE_VISION_MODEL || 'google/gemini-3.5-flash-lite';
+  process.env.FRAMESCRIPT_SMOKE_VISION_MODEL || 'minimax/minimax-m3';
 const expectedGitSha = process.env.FRAMESCRIPT_SMOKE_GIT_SHA || '';
 const expectedEnvironment = process.env.FRAMESCRIPT_SMOKE_ENVIRONMENT || '';
+
+function parseProviderAllowlist(value, fallback) {
+  return new Set(
+    (value || fallback)
+      .split(',')
+      .map((provider) => provider.trim())
+      .filter(Boolean),
+  );
+}
+
+const allowedAsrProviders = parseProviderAllowlist(
+  process.env.FRAMESCRIPT_SMOKE_ASR_PROVIDERS,
+  'vercel-ai-gateway,openai-compatible',
+);
+const allowedVisionProviders = parseProviderAllowlist(
+  process.env.FRAMESCRIPT_SMOKE_VISION_PROVIDERS,
+  'vercel-ai-gateway',
+);
 
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -52,10 +70,11 @@ async function checkCapabilities() {
 
   if (body?.transcription?.configured !== true) fail('transcription is not configured');
   if (body?.vision?.configured !== true) fail('vision is not configured');
-  if (body.transcription.provider !== 'vercel-ai-gateway') {
+
+  if (!allowedAsrProviders.has(body.transcription.provider)) {
     fail(`unexpected ASR provider ${String(body.transcription.provider)}`);
   }
-  if (body.vision.provider !== 'vercel-ai-gateway') {
+  if (!allowedVisionProviders.has(body.vision.provider)) {
     fail(`unexpected vision provider ${String(body.vision.provider)}`);
   }
   if (body.transcription.model !== expectedAsrModel) {
@@ -79,7 +98,7 @@ async function checkCapabilities() {
     ? ` sha=${body.deployment.commitSha.slice(0, 12)} env=${String(body.deployment.environment)}`
     : '';
   console.log(
-    `[production-ai-smoke] capabilities OK: ASR=${body.transcription.model} vision=${body.vision.model}${identity}`,
+    `[production-ai-smoke] capabilities OK: ASR=${body.transcription.provider}/${body.transcription.model} vision=${body.vision.provider}/${body.vision.model}${identity}`,
   );
 }
 
