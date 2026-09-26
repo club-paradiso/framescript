@@ -5,6 +5,7 @@ import { transcribeViaGateway } from '../api/_lib/gatewayAsr';
 const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
 const originalOidc = process.env.VERCEL_OIDC_TOKEN;
 const originalFrameScriptKey = process.env.FRAMESCRIPT_ASR_API_KEY;
+const originalFrameScriptEndpoint = process.env.FRAMESCRIPT_ASR_ENDPOINT;
 const originalFrameScriptModel = process.env.FRAMESCRIPT_ASR_MODEL;
 const originalGatewayModel = process.env.FRAMESCRIPT_GATEWAY_ASR_MODEL;
 const originalVisionKey = process.env.FRAMESCRIPT_VISION_API_KEY;
@@ -14,6 +15,7 @@ const originalVisionModel = process.env.FRAMESCRIPT_VISION_MODEL;
 const originalGatewayVisionModel = process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL;
 const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
 const originalOpenRouterVisionModel = process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
+const originalVercel = process.env.VERCEL;
 const requestContextSymbol = Symbol.for('@vercel/request-context');
 const originalRequestContext = (
   globalThis as typeof globalThis & {
@@ -25,6 +27,7 @@ afterEach(() => {
   restore('AI_GATEWAY_API_KEY', originalGatewayKey);
   restore('VERCEL_OIDC_TOKEN', originalOidc);
   restore('FRAMESCRIPT_ASR_API_KEY', originalFrameScriptKey);
+  restore('FRAMESCRIPT_ASR_ENDPOINT', originalFrameScriptEndpoint);
   restore('FRAMESCRIPT_ASR_MODEL', originalFrameScriptModel);
   restore('FRAMESCRIPT_GATEWAY_ASR_MODEL', originalGatewayModel);
   restore('FRAMESCRIPT_VISION_API_KEY', originalVisionKey);
@@ -34,6 +37,7 @@ afterEach(() => {
   restore('FRAMESCRIPT_GATEWAY_VISION_MODEL', originalGatewayVisionModel);
   restore('OPENROUTER_API_KEY', originalOpenRouterKey);
   restore('FRAMESCRIPT_OPENROUTER_VISION_MODEL', originalOpenRouterVisionModel);
+  restore('VERCEL', originalVercel);
 
   const runtime = globalThis as typeof globalThis & {
     [requestContextSymbol]?: { get?: () => { headers?: Record<string, string> } };
@@ -101,9 +105,36 @@ describe('Vercel AI Gateway ASR configuration', () => {
       model: 'custom-model',
     });
   });
+
+  it('removes the Gateway namespace when a GPT transcription model is sent directly to OpenAI', () => {
+    process.env.FRAMESCRIPT_ASR_API_KEY = 'explicit-key';
+    process.env.FRAMESCRIPT_ASR_ENDPOINT = 'https://api.openai.com/v1/audio/transcriptions';
+    process.env.FRAMESCRIPT_ASR_MODEL = 'openai/gpt-4o-transcribe';
+
+    expect(readAsrConfig()).toMatchObject({
+      provider: 'openai-compatible',
+      endpoint: 'https://api.openai.com/v1/audio/transcriptions',
+      model: 'gpt-4o-transcribe',
+    });
+  });
 });
 
 describe('Vercel AI Gateway vision configuration', () => {
+  it('hard-routes Vercel production to the dedicated free MiniMax M3 SKU', () => {
+    process.env.VERCEL = '1';
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
+      apiKey: 'gateway-key',
+      gatewayAuthMethod: 'api-key',
+      model: 'minimax/minimax-m3-free',
+    });
+  });
+
   it('uses the per-request Vercel OIDC context when no long-lived vision key exists', () => {
     delete process.env.FRAMESCRIPT_VISION_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
