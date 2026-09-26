@@ -123,7 +123,7 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
   const form = new FormData();
   form.append('file', wavBlob(request.wav), 'window.wav');
   form.append('model', request.model);
-  form.append('response_format', request.responseFormat ?? 'verbose_json');
+  form.append('response_format', request.responseFormat ?? defaultResponseFormat(request.model));
   if (request.languageHint) form.append('language', request.languageHint);
 
   const doFetch = request.fetchImpl ?? fetch;
@@ -161,6 +161,17 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
     ...(language ? { language } : {}),
     ...(segments.length > 0 ? { segments } : {}),
   };
+}
+
+function defaultResponseFormat(model: string): 'json' | 'verbose_json' {
+  const unqualified = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+  if (
+    unqualified.startsWith('gpt-4o-transcribe') ||
+    unqualified.startsWith('gpt-4o-mini-transcribe')
+  ) {
+    return 'json';
+  }
+  return 'verbose_json';
 }
 
 function wavBlob(wav: Uint8Array): Blob {
