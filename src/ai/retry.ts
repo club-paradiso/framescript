@@ -10,7 +10,11 @@
  * code path here that can loop indefinitely.
  */
 
-import { FrameScriptError, type FrameScriptErrorCode } from '../utils/errors.js';
+import {
+  FrameScriptError,
+  type FrameScriptErrorCode,
+  type ProviderFailureReason,
+} from '../utils/errors.js';
 
 export type ProviderKindForErrors = 'asr' | 'vision';
 
@@ -30,6 +34,35 @@ function codeFor(kind: ProviderKindForErrors, suffix: string): FrameScriptErrorC
   return `${kind === 'asr' ? 'ASR' : 'VISION'}_${suffix}` as FrameScriptErrorCode;
 }
 
+const REASON_TOKENS: readonly ProviderFailureReason[] = [
+  'customer_verification_required',
+  'insufficient_funds',
+  'payment_required',
+  'no_providers_available',
+  'model_not_found',
+];
+
+/**
+ * Picks the allowlisted refusal reason out of a provider's error type/code.
+ *
+ * Only exact members of `ProviderFailureReason` (or a `model_not_found`
+ * variant) are recognized; any other provider text is discarded. A bare 402
+ * with no recognizable type still means the provider account cannot pay for
+ * the request, so it is reported as `payment_required`.
+ */
+export function providerFailureReason(
+  status: number,
+  hint: ProviderFailureHint = {},
+): ProviderFailureReason | undefined {
+  const tokens = [hint.type, hint.code].map((value) => value?.trim().toLowerCase() ?? '');
+  for (const reason of REASON_TOKENS) {
+    if (tokens.includes(reason)) return reason;
+  }
+  if (tokens.some((token) => token.includes('model_not_found'))) return 'model_not_found';
+  if (status === 402) return 'payment_required';
+  return undefined;
+}
+
 /**
  * Maps an HTTP status from a provider onto a FrameScript error code.
  *
@@ -40,10 +73,12 @@ function codeFor(kind: ProviderKindForErrors, suffix: string): FrameScriptErrorC
  * Vercel AI Gateway uses 403 + `no_providers_available` when a team allowlist
  * blocks the requested model/provider. It also uses 403 +
  * `customer_verification_required` when the deployment's Vercel team must
- * complete account verification before paid inference is permitted. Neither
- * condition is fixed by retrying the same request or rotating model slugs, so
- * both are represented as deployment-level model unavailability rather than a
- * bad API credential.
+ * complete account verification before paid inference is permitted, and 402 +
+ * `insufficient_funds` when the team has no credit balance. OpenRouter returns
+ * 402 when the key's account has insufficient credits. None of these is fixed
+ * by retrying the same request or rotating model slugs, so all are represented
+ * as deployment-level model unavailability rather than a bad API credential or
+ * a transient provider failure.
  */
 export function classifyHttpFailure(
   status: number,
@@ -51,16 +86,9 @@ export function classifyHttpFailure(
   hint: ProviderFailureHint = {},
 ): HttpFailure {
   const failed = codeFor(kind, 'PROVIDER_FAILED');
-  const normalizedType = hint.type?.trim().toLowerCase() ?? '';
   const normalizedCode = hint.code?.trim().toLowerCase() ?? '';
-  const verificationRequired =
-    normalizedType === 'customer_verification_required' ||
-    normalizedCode === 'customer_verification_required';
   const modelUnavailable =
-    verificationRequired ||
-    normalizedType === 'no_providers_available' ||
-    normalizedType.includes('model_not_found') ||
-    normalizedCode.includes('model_not_found') ||
+    providerFailureReason(status, hint) !== undefined ||
     normalizedCode.includes('model_unavailable');
 
   if (status === 429) return { code: codeFor(kind, 'RATE_LIMITED'), retryable: true };
@@ -83,7 +111,13 @@ export function providerError(
   hint: ProviderFailureHint = {},
 ): FrameScriptError {
   const { code, retryable } = classifyHttpFailure(status, kind, hint);
-  return new FrameScriptError({ code, detail, recoverable: retryable });
+  const reason = providerFailureReason(status, hint);
+  return new FrameScriptError({
+    code,
+    detail,
+    recoverable: retryable,
+    ...(reason ? { reason } : {}),
+  });
 }
 
 /**
@@ -98,13 +132,19 @@ export async function providerResponseError(
 ): Promise<FrameScriptError> {
   const hint = await readProviderFailureHint(response);
   const { code, retryable } = classifyHttpFailure(response.status, kind, hint);
+  const reason = providerFailureReason(response.status, hint);
   const parts = [context, `upstreamStatus=${response.status}`];
   if (hint.type) parts.push(`type=${sanitizeToken(hint.type)}`);
   if (hint.code) parts.push(`code=${sanitizeToken(hint.code)}`);
   if (hint.statusCode !== undefined && hint.statusCode !== response.status) {
     parts.push(`reportedStatus=${hint.statusCode}`);
   }
-  return new FrameScriptError({ code, detail: parts.join(' '), recoverable: retryable });
+  return new FrameScriptError({
+    code,
+    detail: parts.join(' '),
+    recoverable: retryable,
+    ...(reason ? { reason } : {}),
+  });
 }
 
 async function readProviderFailureHint(response: Response): Promise<ProviderFailureHint> {

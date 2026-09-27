@@ -199,6 +199,28 @@ describe('POST /api/transcribe', () => {
     expect(text).not.toContain('quota exhausted');
   });
 
+  it('reports an out-of-credit provider as a non-retryable 503 with a safe reason', async () => {
+    configureAsr();
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { message: `Insufficient credits for ${SECRET}`, code: 402 } }),
+          { status: 402, headers: { 'content-type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    const text = await response.text();
+    expect(response.status).toBe(503);
+    expect(JSON.parse(text)).toEqual({
+      code: 'ASR_MODEL_UNAVAILABLE',
+      message: expect.any(String),
+      reason: 'payment_required',
+    });
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain('Insufficient credits');
+  });
+
   it('rejects a window longer than the endpoint accepts', async () => {
     configureAsr();
     const response = await transcribe(transcribeRequest({ startMs: '0', endMs: '90000' }));
@@ -337,5 +359,74 @@ describe('POST /api/analyze-frame', () => {
     const text = await (await analyzeFrame(frameRequest())).text();
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain('invalid x-api-key');
+  });
+});
+
+describe('POST /api/analyze-frame on Vercel production', () => {
+  it('sends frames only to the pinned $0 Gateway model with its declared wire options', async () => {
+    process.env.VERCEL = '1';
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    delete process.env.OPENROUTER_API_KEY;
+    // A stale paid-capable override must not be used.
+    configureVision();
+
+    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  actions: [],
+                  characters: [],
+                  settingChanges: [],
+                  text: [],
+                  uncertainties: ['A single flat frame shows no discernible content.'],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const response = await analyzeFrame(frameRequest());
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(String(url)).toBe('https://ai-gateway.vercel.sh/v1/chat/completions');
+    const sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(sent.model).toBe('stealth/pixel-canary');
+    expect(sent).not.toHaveProperty('response_format');
+    expect(sent.reasoning).toEqual({ effort: 'none' });
+    const body = (await response.json()) as { provider: string; model: string };
+    expect(body).toMatchObject({ provider: 'vercel-ai-gateway', model: 'stealth/pixel-canary' });
+  });
+
+  it('returns the allowlisted Gateway reason when the model is withdrawn', async () => {
+    process.env.VERCEL = '1';
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    delete process.env.OPENROUTER_API_KEY;
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: { message: 'Model stealth/pixel-canary not found', type: 'model_not_found' },
+          }),
+          { status: 404, headers: { 'content-type': 'application/json' } },
+        ),
+    ) as unknown as typeof fetch;
+
+    const response = await analyzeFrame(frameRequest());
+    const text = await response.text();
+    expect(response.status).toBe(503);
+    expect(JSON.parse(text)).toMatchObject({
+      code: 'VISION_MODEL_UNAVAILABLE',
+      reason: 'model_not_found',
+    });
+    expect(text).not.toContain('not found');
+    expect(text).not.toContain(SECRET);
   });
 });

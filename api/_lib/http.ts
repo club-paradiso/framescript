@@ -8,7 +8,8 @@
  *      worker.
  *   2. **Errors never echo the provider.** A provider's error body can quote
  *      the request, and the request is audio or frames. Responses carry a
- *      FrameScript error code and a fixed message, nothing more.
+ *      FrameScript error code, a fixed message, and at most an allowlisted
+ *      refusal reason; nothing from the provider body itself.
  *   3. **Every request is bounded** before anything is read into memory.
  */
 
@@ -82,7 +83,11 @@ export function errorResponse(error: unknown): Response {
   // Logged server-side only. Provider adapters deliberately include only safe
   // status/type/code/model/size metadata, never provider bodies, auth, or media.
   console.error('[framescript-api]', code, errorDetail(error));
-  return json({ code, message }, status);
+  // `reason` is a closed enum (see ProviderFailureReason), never provider
+  // text. It tells an operator which account or routing gate refused the
+  // request without requiring access to the server's runtime logs.
+  const reason = FrameScriptError.is(error) ? error.reason : undefined;
+  return json({ code, message, ...(reason ? { reason } : {}) }, status);
 }
 
 /** Rejects a body larger than the limit before it is buffered. */

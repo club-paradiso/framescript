@@ -88,6 +88,7 @@ export async function POST(request: Request): Promise<Response> {
           endpoint: vision.endpoint,
           model: vision.model,
           maxFramesPerRequest: LIMITS.maxFramesPerRequest,
+          ...(vision.requestOptions ? { requestOptions: vision.requestOptions } : {}),
         });
 
   const windowRequest: VisionWindowRequest = {

@@ -30,7 +30,7 @@ function parseAllowlist(value, fallback) {
 
 const allowedAsrProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_ASR_PROVIDERS,
-  'vercel-ai-gateway,openai-compatible',
+  'vercel-ai-gateway',
 );
 const allowedVisionProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_VISION_PROVIDERS,
@@ -38,12 +38,18 @@ const allowedVisionProviders = parseAllowlist(
 );
 const allowedAsrModels = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_ASR_MODELS,
-  'openai/gpt-4o-transcribe,gpt-4o-transcribe',
+  'openai/gpt-4o-transcribe',
 );
 const allowedVisionModels = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_VISION_MODELS,
-  'minimax/minimax-m3-free',
+  'stealth/pixel-canary',
 );
+
+/** Public, unauthenticated model catalogs used to prove vision is $0. */
+const GATEWAY_CATALOG = 'https://ai-gateway.vercel.sh/v1/models';
+const OPENROUTER_CATALOG = 'https://openrouter.ai/api/v1/models';
+/** FrameScript API error `reason` is a closed enum; anything else is dropped. */
+const SAFE_REASON = /^[a-z_]{1,64}$/;
 
 const PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -61,9 +67,82 @@ async function jsonResponse(response, label) {
   }
   if (!response.ok) {
     const code = body && typeof body.code === 'string' ? body.code : 'unknown';
-    fail(`${label} returned HTTP ${response.status} code=${code}`);
+    const reason =
+      body && typeof body.reason === 'string' && SAFE_REASON.test(body.reason)
+        ? ` reason=${body.reason}`
+        : '';
+    fail(`${label} returned HTTP ${response.status} code=${code}${reason}`);
   }
   return body;
+}
+
+/** A published price: a JSON number or a plain decimal string such as "0" or "0.0001". */
+const PRICE = /^\d+(\.\d+)?$/;
+
+/**
+ * True only when `pricing` publishes at least one price and every leaf is a
+ * well-formed price equal to zero. A null, blank or non-numeric leaf means the
+ * price is unknown, which is not proof of $0, so it fails.
+ */
+function allPricesZero(pricing) {
+  if (pricing === null || typeof pricing !== 'object') return false;
+  let sawPrice = false;
+  const visit = (value) => {
+    if (Array.isArray(value)) return value.every(visit);
+    if (value !== null && typeof value === 'object') return Object.values(value).every(visit);
+    const text = typeof value === 'number' ? String(value) : value;
+    if (typeof text !== 'string' || !PRICE.test(text)) return false;
+    sawPrice = true;
+    return Number(text) === 0;
+  };
+  return visit(pricing) && sawPrice;
+}
+
+async function publicJson(url, label) {
+  const response = await fetch(url, { headers: { accept: 'application/json' }, cache: 'no-store' });
+  if (!response.ok) fail(`${label} catalog returned HTTP ${response.status}`);
+  try {
+    return await response.json();
+  } catch {
+    fail(`${label} catalog returned a non-JSON body`);
+  }
+}
+
+/**
+ * Production vision must be $0. A pinned slug can be repriced or withdrawn
+ * upstream after it was chosen, so this proves the price against the live
+ * public catalog before any frame is sent. For Gateway it checks every serving
+ * endpoint, so a paid provider behind the same model id also fails the smoke.
+ */
+async function checkVisionZeroCost(provider, model) {
+  if (provider === 'vercel-ai-gateway') {
+    const body = await publicJson(
+      `${GATEWAY_CATALOG}/${model.split('/').map(encodeURIComponent).join('/')}/endpoints`,
+      'Gateway',
+    );
+    const endpoints = body?.data?.endpoints;
+    if (!Array.isArray(endpoints) || endpoints.length === 0) {
+      fail(`vision model ${model} has no serving endpoints in the Gateway catalog`);
+    }
+    if (!endpoints.every((endpoint) => allPricesZero(endpoint?.pricing))) {
+      fail(`vision model ${model} has a non-zero price in the Gateway catalog`);
+    }
+    console.log(
+      `[production-ai-smoke] vision cost OK: ${model} is $0 on all ${endpoints.length} Gateway endpoint(s)`,
+    );
+    return;
+  }
+  if (provider === 'openai-compatible') {
+    const body = await publicJson(OPENROUTER_CATALOG, 'OpenRouter');
+    const entry = Array.isArray(body?.data) ? body.data.find((m) => m?.id === model) : undefined;
+    if (!entry) fail(`vision model ${model} is not listed in the OpenRouter catalog`);
+    if (!allPricesZero(entry.pricing)) {
+      fail(`vision model ${model} has a non-zero price in the OpenRouter catalog`);
+    }
+    console.log(`[production-ai-smoke] vision cost OK: ${model} is $0 in the OpenRouter catalog`);
+    return;
+  }
+  fail(`cannot prove vision cost for provider ${String(provider)}`);
 }
 
 async function checkCapabilities() {
@@ -105,6 +184,7 @@ async function checkCapabilities() {
   console.log(
     `[production-ai-smoke] capabilities OK: ASR=${body.transcription.provider}/${body.transcription.model} vision=${body.vision.provider}/${body.vision.model}${identity}`,
   );
+  return body;
 }
 
 async function checkTranscription() {
@@ -166,7 +246,8 @@ function safeFailure(error) {
   return error.message.replace(/^\[production-ai-smoke\]\s*/, '');
 }
 
-await checkCapabilities();
+const capabilities = await checkCapabilities();
+await checkVisionZeroCost(capabilities.vision.provider, capabilities.vision.model);
 
 const failures = [];
 for (const [label, check] of [

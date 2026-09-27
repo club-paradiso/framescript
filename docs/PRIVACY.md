@@ -79,8 +79,13 @@ already on).
 Both stages are bounded per file. Transcription plans speech windows against a
 total budget; scene understanding is capped by an explicit control that is
 separate from local observation fidelity, so choosing a denser local scan never
-sends more. Nothing is retained server-side: the analysis routes store nothing,
-respond with `no-store`, and the service worker skips `/api/` entirely.
+sends more. FrameScript retains nothing server-side: the analysis routes store
+nothing, respond with `no-store`, and the service worker skips `/api/` entirely.
+The upstream model provider applies its own data terms. The hosted Studio's
+zero-cost scene-understanding model is run by a provider that states prompts and
+outputs may be retained for training (see `DEPLOYMENT_FREE_VISION.md`), so the
+selected keyframes and window dialogue sent for scene understanding may be kept
+by that provider.
 
 A 120-minute film in Detailed mode produces roughly 72,000 observations and
 roughly 7,000 deep-analysis candidates, of which the budget admits a small
