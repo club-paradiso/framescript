@@ -1,0 +1,44 @@
+name: TEMP catalog probe (remove before merge)
+
+on:
+  push:
+    branches: [claude/production-ai-provider-recovery-dwmn1j]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Public Vercel AI Gateway and OpenRouter catalogs (no credentials)
+        shell: python
+        run: |
+          import json, urllib.request
+          def get(url):
+              req = urllib.request.Request(url, headers={"accept": "application/json", "user-agent": "framescript-catalog-probe"})
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return json.load(r)
+          gw = get("https://ai-gateway.vercel.sh/v1/models")["data"]
+          print("GATEWAY total", len(gw))
+          for m in gw:
+              mid = m.get("id", "")
+              typ = m.get("type")
+              tags = m.get("tags") or []
+              pricing = m.get("pricing") or {}
+              interesting = ("free" in mid) or typ in ("transcription", "speech") or mid.startswith(("minimax/", "inclusionai/", "fish-audio/"))
+              if interesting:
+                  print("GW", json.dumps({"id": mid, "type": typ, "tags": tags, "pricing": pricing, "context": m.get("context_window")}))
+          free_img = [m.get("id") for m in gw if all(str(v) in ("0", "0.0", "0.00") for k, v in (m.get("pricing") or {}).items() if k in ("input", "output")) and (m.get("pricing") or {}).get("input") is not None and "vision" in (m.get("tags") or [])]
+          print("GW_ZERO_PRICE_VISION", json.dumps(free_img))
+          orm = get("https://openrouter.ai/api/v1/models")["data"]
+          print("OPENROUTER total", len(orm))
+          for m in orm:
+              arch = m.get("architecture") or {}
+              ins = arch.get("input_modalities") or []
+              mid = m.get("id", "")
+              if (mid.endswith(":free") or mid == "openrouter/free") and "image" in ins:
+                  print("OR_FREE_IMAGE", json.dumps({"id": mid, "in": ins, "out": arch.get("output_modalities"), "pricing": m.get("pricing"), "params": m.get("supported_parameters")}))
+              if "audio" in ins and ("transcribe" in mid or "whisper" in mid):
+                  print("OR_ASR", json.dumps({"id": mid, "pricing": m.get("pricing")}))
