@@ -76,18 +76,24 @@ async function jsonResponse(response, label) {
   return body;
 }
 
-/** True when every numeric price anywhere in `pricing` is exactly zero. */
+/** A published price: a JSON number or a plain decimal string such as "0" or "0.0001". */
+const PRICE = /^\d+(\.\d+)?$/;
+
+/**
+ * True only when `pricing` publishes at least one price and every leaf is a
+ * well-formed price equal to zero. A null, blank or non-numeric leaf means the
+ * price is unknown, which is not proof of $0, so it fails.
+ */
 function allPricesZero(pricing) {
-  if (pricing === null || pricing === undefined) return false;
+  if (pricing === null || typeof pricing !== 'object') return false;
   let sawPrice = false;
   const visit = (value) => {
     if (Array.isArray(value)) return value.every(visit);
-    if (value && typeof value === 'object') return Object.values(value).every(visit);
-    if (typeof value === 'boolean') return true;
-    const number = Number(value);
-    if (!Number.isFinite(number)) return true;
+    if (value !== null && typeof value === 'object') return Object.values(value).every(visit);
+    const text = typeof value === 'number' ? String(value) : value;
+    if (typeof text !== 'string' || !PRICE.test(text)) return false;
     sawPrice = true;
-    return number === 0;
+    return Number(text) === 0;
   };
   return visit(pricing) && sawPrice;
 }

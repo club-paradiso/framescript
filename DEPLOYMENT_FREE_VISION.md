@@ -6,7 +6,7 @@ The provider states that prompts and outputs may be retained for training. In pr
 
 If `OPENROUTER_API_KEY` is set in production, vision uses the OpenRouter hard-free path instead. There it accepts only `:free` slugs or `openrouter/free`; the default is `google/gemma-4-31b-it:free`. A paid slug is refused with a configuration error. It never falls back to a paid model.
 
-`FRAMESCRIPT_VISION_*` and `FRAMESCRIPT_GATEWAY_VISION_MODEL` are ignored in Vercel production, so stale configuration that could reach a paid model cannot create billable vision traffic.
+`FRAMESCRIPT_VISION_*` and `FRAMESCRIPT_GATEWAY_VISION_MODEL` are ignored in Vercel production, so stale configuration that could reach a paid model cannot create billable vision traffic. If neither zero-cost route has a credential, production reports vision as not configured instead of using them. Switching production to the OpenRouter route also means updating the smoke's `FRAMESCRIPT_SMOKE_VISION_*` allowlist, and that change should be deliberate.
 
 A pinned model can be withdrawn or repriced upstream. `minimax/minimax-m3-free` was a promotional SKU; once the offer ended, Gateway answered 404 `model_not_found`. For that reason the Production AI smoke (`scripts/production-ai-smoke.mjs`) re-proves a $0 price against the public catalog on every production deployment, before it sends any frame. A withdrawn model shows up as `VISION_MODEL_UNAVAILABLE` with `reason=model_not_found`.
 

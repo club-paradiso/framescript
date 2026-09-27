@@ -105,8 +105,12 @@ export function DocsPage() {
               all. When transcription or scene understanding is enabled, the request goes to this
               site’s own endpoint, which holds the provider credential server-side: the browser
               never sees a key. What is sent is bounded to the detected speech windows and the
-              selected keyframes, and nothing is stored. The extension’s remote model integrations
-              are separate, opt-in, and configured with your own key in the extension.
+              selected keyframes, and FrameScript stores none of it. The model provider applies its
+              own data terms: the zero-cost scene-understanding model used by the hosted Studio is
+              run by a provider that states prompts and outputs may be retained for training, so
+              leave scene understanding off for footage you do not want to share. The extension’s
+              remote model integrations are separate, opt-in, and configured with your own key in
+              the extension.
             </p>
           </DocSection>
           <DocSection id="development" title="Development and deployment">

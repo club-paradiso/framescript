@@ -334,7 +334,7 @@ export function MediaAnalyzer({
           </select>
           <p className="muted small">
             {canSeeScenes
-              ? `At most ${sceneWindows} requests for this file, each carrying up to 3 downscaled keyframes chosen around a cut or a sustained action. Never the video.`
+              ? `At most ${sceneWindows} requests for this file, each carrying up to 3 downscaled keyframes chosen around a cut or a sustained action. Never the video. The scene provider's own data-retention terms apply.`
               : 'Unavailable: this deployment has no scene-understanding provider configured.'}
           </p>
         </div>

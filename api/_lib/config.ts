@@ -241,6 +241,13 @@ export function readVisionConfig(): VisionConfig | { error: string } {
         requestOptions: PRODUCTION_FREE_GATEWAY_VISION_OPTIONS,
       };
     }
+
+    // No zero-cost route is available. Never fall through to the explicit
+    // FRAMESCRIPT_VISION_* path here: it has no price guard.
+    return {
+      error:
+        'Production vision needs a zero-cost route: AI Gateway OIDC (or AI_GATEWAY_API_KEY), or OPENROUTER_API_KEY. Paid FRAMESCRIPT_VISION_* overrides are not used on Vercel.',
+    };
   }
 
   const explicitApiKey = env('FRAMESCRIPT_VISION_API_KEY');

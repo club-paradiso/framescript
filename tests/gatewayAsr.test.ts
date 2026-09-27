@@ -175,6 +175,22 @@ describe('Vercel AI Gateway vision configuration', () => {
     });
   });
 
+  it('refuses vision in Vercel production rather than use a paid explicit override', () => {
+    // No zero-cost route: no OpenRouter key, no Gateway key, no OIDC token.
+    process.env.VERCEL = '1';
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    delete process.env.VERCEL_OIDC_TOKEN;
+    process.env.FRAMESCRIPT_VISION_PROVIDER = 'anthropic';
+    process.env.FRAMESCRIPT_VISION_API_KEY = 'explicit-vision-key';
+    process.env.FRAMESCRIPT_VISION_MODEL = 'claude-paid-model';
+
+    expect(readVisionConfig()).toEqual({
+      error:
+        'Production vision needs a zero-cost route: AI Gateway OIDC (or AI_GATEWAY_API_KEY), or OPENROUTER_API_KEY. Paid FRAMESCRIPT_VISION_* overrides are not used on Vercel.',
+    });
+  });
+
   it('uses the hard-free OpenRouter path in Vercel production when its key exists', () => {
     process.env.VERCEL = '1';
     delete process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
