@@ -52,6 +52,20 @@ export type FrameScriptErrorCode =
   | 'MESSAGE_INVALID'
   | 'UNSUPPORTED';
 
+/**
+ * Why an upstream AI provider refused a request, when that reason is one of a
+ * fixed set of operator-actionable account or routing states. This is a closed
+ * enum rather than provider text, so it is safe to return to the browser: it
+ * names what the deployment's operator must fix without echoing any provider
+ * body, credential, or media-derived content.
+ */
+export type ProviderFailureReason =
+  | 'payment_required'
+  | 'insufficient_funds'
+  | 'customer_verification_required'
+  | 'no_providers_available'
+  | 'model_not_found';
+
 export interface FrameScriptErrorInit {
   code: FrameScriptErrorCode;
   /** Internal, developer-facing detail. Never rendered verbatim to the user. */
@@ -59,12 +73,15 @@ export interface FrameScriptErrorInit {
   cause?: unknown;
   /** True when retrying the same operation could plausibly succeed. */
   recoverable?: boolean;
+  /** Allowlisted upstream refusal reason; see `ProviderFailureReason`. */
+  reason?: ProviderFailureReason;
 }
 
 export class FrameScriptError extends Error {
   readonly code: FrameScriptErrorCode;
   readonly detail: string | undefined;
   readonly recoverable: boolean;
+  readonly reason: ProviderFailureReason | undefined;
 
   constructor(init: FrameScriptErrorInit) {
     super(init.detail ? `${init.code}: ${init.detail}` : init.code, { cause: init.cause });
@@ -72,6 +89,7 @@ export class FrameScriptError extends Error {
     this.code = init.code;
     this.detail = init.detail;
     this.recoverable = init.recoverable ?? false;
+    this.reason = init.reason;
   }
 
   static is(value: unknown): value is FrameScriptError {

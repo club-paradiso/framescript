@@ -216,6 +216,7 @@ export {
   isAbort,
   isTransientNetworkError,
   providerError,
+  providerFailureReason,
   retryDelayMs,
   withRetry,
 } from '../ai/retry';

@@ -10,6 +10,8 @@
  * "Transcription — not configured" and keeps doing local analysis.
  */
 
+import type { OpenAiCompatibleVisionRequestOptions } from '../../src/ai/providers/openaiCompatibleVision.js';
+
 export type AsrProviderId = 'openai-compatible' | 'vercel-ai-gateway';
 export type VisionProviderId = 'anthropic' | 'openai-compatible' | 'vercel-ai-gateway';
 export type GatewayAuthMethod = 'api-key' | 'oidc';
@@ -28,6 +30,7 @@ export interface VisionConfig {
   apiKey: string;
   model: string;
   gatewayAuthMethod?: GatewayAuthMethod;
+  requestOptions?: OpenAiCompatibleVisionRequestOptions;
 }
 
 /** What the browser is allowed to know. Never contains a key or a full URL. */
@@ -62,12 +65,27 @@ const DEFAULT_GATEWAY_ASR_MODEL = 'openai/gpt-4o-transcribe';
 const DEFAULT_GATEWAY_VISION_ENDPOINT = 'https://ai-gateway.vercel.sh/v1/chat/completions';
 // Keep the historical Gateway fallback for local/non-production environments.
 const DEFAULT_GATEWAY_VISION_MODEL = 'google/gemini-3.5-flash-lite';
-// Vercel exposes a dedicated zero-cost MiniMax M3 SKU. Production deliberately
-// hard-pins to the -free slug so the separate billable base model can never be
-// selected by stale FRAMESCRIPT_VISION_* variables.
-const PRODUCTION_FREE_GATEWAY_VISION_MODEL = 'minimax/minimax-m3-free';
+// Production vision is hard-pinned to a Gateway model whose every serving
+// endpoint is priced at $0 (prompt, completion, image, request, reasoning) in
+// the live catalog, so stale FRAMESCRIPT_VISION_* variables can never select a
+// billable model. The previous pin, minimax/minimax-m3-free, was a promotional
+// SKU that Gateway withdrew when its offer ended (404 model_not_found).
+// The catalog entry for this model does not declare `response_format`, and its
+// reasoning effort accepts none/low/medium/xhigh; FrameScript asks for no
+// reasoning so the whole token budget goes to the JSON observation. The
+// production smoke re-checks the $0 price against the live catalog on every
+// deployment, because a pinned slug can be repriced or withdrawn upstream.
+// The provider states that prompts and outputs may be retained for training.
+const PRODUCTION_FREE_GATEWAY_VISION_MODEL = 'stealth/pixel-canary';
+const PRODUCTION_FREE_GATEWAY_VISION_OPTIONS: OpenAiCompatibleVisionRequestOptions = {
+  jsonResponseFormat: false,
+  reasoningEffort: 'none',
+};
 const DEFAULT_OPENROUTER_VISION_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_OPENROUTER_VISION_MODEL = 'minimax/minimax-m3:free';
+// Listed as $0 prompt/completion with image input and `response_format` in
+// OpenRouter's live catalog. The previous default (minimax/minimax-m3:free) is
+// no longer listed.
+const DEFAULT_OPENROUTER_VISION_MODEL = 'google/gemma-4-31b-it:free';
 const DEFAULT_ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 const VERCEL_REQUEST_CONTEXT = Symbol.for('@vercel/request-context');
 
@@ -179,12 +197,39 @@ export function readAsrConfig(): AsrConfig | { error: string } {
   };
 }
 
+/**
+ * A dedicated OpenRouter key opts vision into a hard-free path. The selected
+ * model must be a `:free` slug (or the `openrouter/free` router), which prevents
+ * a typo or later environment edit from silently turning scene analysis into a
+ * billable workload. There is intentionally no paid fallback from this path.
+ */
+function openRouterFreeVisionConfig(apiKey: string): VisionConfig | { error: string } {
+  const model = env('FRAMESCRIPT_OPENROUTER_VISION_MODEL') || DEFAULT_OPENROUTER_VISION_MODEL;
+  if (!isFreeOpenRouterModel(model)) {
+    return {
+      error:
+        'FRAMESCRIPT_OPENROUTER_VISION_MODEL must use a :free model (or openrouter/free) when OPENROUTER_API_KEY is configured.',
+    };
+  }
+  return {
+    provider: 'openai-compatible',
+    endpoint: DEFAULT_OPENROUTER_VISION_ENDPOINT,
+    apiKey,
+    model,
+  };
+}
+
 export function readVisionConfig(): VisionConfig | { error: string } {
-  // Production on Vercel is hard-routed to the free AI Gateway model before any
-  // legacy explicit provider configuration is considered. This is intentional:
-  // the project has historically carried paid-capable FRAMESCRIPT_VISION_*
-  // overrides, and the product requirement is now a strict $0 vision budget.
+  // Production on Vercel may only use a zero-cost route, and is decided before
+  // any legacy explicit provider configuration is considered. This is
+  // intentional: the project has historically carried paid-capable
+  // FRAMESCRIPT_VISION_* overrides, and the product requirement is a strict $0
+  // vision budget. The OpenRouter hard-free path wins when its key exists;
+  // otherwise vision goes through Gateway to the pinned $0 model.
   if (env('VERCEL') === '1') {
+    const openRouterApiKey = env('OPENROUTER_API_KEY');
+    if (openRouterApiKey) return openRouterFreeVisionConfig(openRouterApiKey);
+
     const productionGateway = gatewayCredential();
     if (productionGateway) {
       return {
@@ -193,6 +238,7 @@ export function readVisionConfig(): VisionConfig | { error: string } {
         apiKey: productionGateway.token,
         gatewayAuthMethod: productionGateway.authMethod,
         model: PRODUCTION_FREE_GATEWAY_VISION_MODEL,
+        requestOptions: PRODUCTION_FREE_GATEWAY_VISION_OPTIONS,
       };
     }
   }
@@ -214,26 +260,8 @@ export function readVisionConfig(): VisionConfig | { error: string } {
     return { provider, endpoint, apiKey: explicitApiKey, model };
   }
 
-  // A dedicated OpenRouter key opts vision into a hard-free path. The selected
-  // model must be a `:free` slug (or the `openrouter/free` router), which prevents
-  // a typo or later environment edit from silently turning scene analysis into a
-  // billable workload. There is intentionally no paid fallback from this path.
   const openRouterApiKey = env('OPENROUTER_API_KEY');
-  if (openRouterApiKey) {
-    const model = env('FRAMESCRIPT_OPENROUTER_VISION_MODEL') || DEFAULT_OPENROUTER_VISION_MODEL;
-    if (!isFreeOpenRouterModel(model)) {
-      return {
-        error:
-          'FRAMESCRIPT_OPENROUTER_VISION_MODEL must use a :free model (or openrouter/free) when OPENROUTER_API_KEY is configured.',
-      };
-    }
-    return {
-      provider: 'openai-compatible',
-      endpoint: DEFAULT_OPENROUTER_VISION_ENDPOINT,
-      apiKey: openRouterApiKey,
-      model,
-    };
-  }
+  if (openRouterApiKey) return openRouterFreeVisionConfig(openRouterApiKey);
 
   // Reuse the same short-lived deployment credential as transcription. The
   // Gateway's OpenAI-compatible chat endpoint accepts image data URLs, which is

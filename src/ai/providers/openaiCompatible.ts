@@ -29,7 +29,7 @@ import type {
 } from '../types.js';
 import { encodeWav, resampleLinear } from '../../audio/dsp.js';
 import { FrameScriptError } from '../../utils/errors.js';
-import { providerError } from '../retry.js';
+import { providerResponseError } from '../retry.js';
 
 export interface OpenAiCompatibleAsrConfig {
   apiKey: string;
@@ -135,7 +135,11 @@ export async function transcribeWav(request: TranscribeWavRequest): Promise<AsrR
   });
 
   if (!response.ok) {
-    throw providerError(response.status, 'asr', `transcription endpoint returned ${response.status}`);
+    throw await providerResponseError(
+      response,
+      'asr',
+      `transcription endpoint returned ${response.status} model=${request.model}`,
+    );
   }
 
   let json: TranscriptionResponse;

@@ -26,6 +26,19 @@ import { FrameScriptError } from '../../utils/errors.js';
 import { providerResponseError } from '../retry.js';
 import { toBase64 } from '../../utils/base64.js';
 
+/**
+ * Per-model wire options. Most chat endpoints accept `response_format`; some
+ * models do not declare it, and a reasoning model can spend its whole token
+ * budget thinking unless the effort is set. The response is validated the same
+ * way either way, so these only change what is asked for, never what is kept.
+ */
+export interface OpenAiCompatibleVisionRequestOptions {
+  /** Send `response_format: { type: 'json_object' }`. Defaults to true. */
+  jsonResponseFormat?: boolean;
+  /** Sent as `reasoning: { effort }` (Vercel AI Gateway / OpenRouter form). */
+  reasoningEffort?: string;
+}
+
 export interface OpenAiCompatibleVisionConfig {
   apiKey: string;
   /** Full endpoint URL, e.g. https://api.openai.com/v1/chat/completions */
@@ -33,6 +46,7 @@ export interface OpenAiCompatibleVisionConfig {
   model: string;
   maxTokens?: number;
   maxFramesPerRequest?: number;
+  requestOptions?: OpenAiCompatibleVisionRequestOptions;
 }
 
 const DEFAULT_MAX_TOKENS = 1500;
@@ -81,6 +95,7 @@ export class OpenAiCompatibleVisionProvider implements VisionAnalysisProvider {
       });
     }
     content.push({ type: 'text', text: buildVisionUserPrompt({ ...request, frames }) });
+    const options = this.#config.requestOptions ?? {};
 
     const response = await fetch(this.#config.endpoint, {
       method: 'POST',
@@ -91,7 +106,10 @@ export class OpenAiCompatibleVisionProvider implements VisionAnalysisProvider {
       body: JSON.stringify({
         model: this.#config.model,
         max_tokens: this.#config.maxTokens ?? DEFAULT_MAX_TOKENS,
-        response_format: { type: 'json_object' },
+        ...(options.jsonResponseFormat === false
+          ? {}
+          : { response_format: { type: 'json_object' } }),
+        ...(options.reasoningEffort ? { reasoning: { effort: options.reasoningEffort } } : {}),
         messages: [
           { role: 'system', content: VISION_SYSTEM_PROMPT },
           { role: 'user', content },

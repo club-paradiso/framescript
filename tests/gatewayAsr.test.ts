@@ -94,6 +94,26 @@ describe('Vercel AI Gateway ASR configuration', () => {
     });
   });
 
+  it('routes ASR through Gateway OIDC once the explicit override key is removed', () => {
+    // Production carried an explicit OpenRouter transcription override whose
+    // account returned 402. Only the key's presence decides precedence, so
+    // leftover endpoint/model variables must not keep the explicit path alive.
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+    delete process.env.AI_GATEWAY_API_KEY;
+    delete process.env.FRAMESCRIPT_GATEWAY_ASR_MODEL;
+    process.env.FRAMESCRIPT_ASR_ENDPOINT = 'https://openrouter.ai/api/v1/audio/transcriptions';
+    process.env.FRAMESCRIPT_ASR_MODEL = 'openai/gpt-4o-transcribe';
+    process.env.VERCEL_OIDC_TOKEN = 'oidc-test-token';
+
+    expect(readAsrConfig()).toEqual({
+      provider: 'vercel-ai-gateway',
+      endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
+      apiKey: 'oidc-test-token',
+      gatewayAuthMethod: 'oidc',
+      model: 'openai/gpt-4o-transcribe',
+    });
+  });
+
   it('keeps an explicitly configured OpenAI-compatible endpoint authoritative', () => {
     process.env.VERCEL_OIDC_TOKEN = 'oidc-test-token';
     process.env.FRAMESCRIPT_ASR_API_KEY = 'explicit-key';
@@ -120,18 +140,66 @@ describe('Vercel AI Gateway ASR configuration', () => {
 });
 
 describe('Vercel AI Gateway vision configuration', () => {
-  it('hard-routes Vercel production to the dedicated free MiniMax M3 SKU', () => {
+  it('hard-routes Vercel production to the pinned $0 Gateway vision model', () => {
     process.env.VERCEL = '1';
     delete process.env.FRAMESCRIPT_VISION_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
     process.env.AI_GATEWAY_API_KEY = 'gateway-key';
 
-    expect(readVisionConfig()).toMatchObject({
+    expect(readVisionConfig()).toEqual({
       provider: 'vercel-ai-gateway',
       endpoint: 'https://ai-gateway.vercel.sh/v1/chat/completions',
       apiKey: 'gateway-key',
       gatewayAuthMethod: 'api-key',
-      model: 'minimax/minimax-m3-free',
+      model: 'stealth/pixel-canary',
+      // The live catalog entry does not declare response_format; reasoning is
+      // switched off so the token budget goes to the JSON observation.
+      requestOptions: { jsonResponseFormat: false, reasoningEffort: 'none' },
+    });
+  });
+
+  it('never lets paid-capable explicit vision variables win in Vercel production', () => {
+    process.env.VERCEL = '1';
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.FRAMESCRIPT_VISION_PROVIDER = 'openai-compatible';
+    process.env.FRAMESCRIPT_VISION_API_KEY = 'explicit-vision-key';
+    process.env.FRAMESCRIPT_VISION_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+    process.env.FRAMESCRIPT_VISION_MODEL = 'google/gemini-3.5-flash-lite';
+    process.env.FRAMESCRIPT_GATEWAY_VISION_MODEL = 'minimax/minimax-m3';
+
+    expect(readVisionConfig()).toMatchObject({
+      provider: 'vercel-ai-gateway',
+      apiKey: 'gateway-key',
+      model: 'stealth/pixel-canary',
+    });
+  });
+
+  it('uses the hard-free OpenRouter path in Vercel production when its key exists', () => {
+    process.env.VERCEL = '1';
+    delete process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.FRAMESCRIPT_VISION_API_KEY = 'explicit-vision-key';
+    process.env.FRAMESCRIPT_VISION_MODEL = 'google/gemini-3.5-flash-lite';
+
+    expect(readVisionConfig()).toEqual({
+      provider: 'openai-compatible',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      apiKey: 'openrouter-key',
+      model: 'google/gemma-4-31b-it:free',
+    });
+  });
+
+  it('refuses a paid OpenRouter vision model in Vercel production instead of falling back', () => {
+    process.env.VERCEL = '1';
+    process.env.AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL = 'google/gemini-3.5-flash-lite';
+
+    expect(readVisionConfig()).toEqual({
+      error:
+        'FRAMESCRIPT_OPENROUTER_VISION_MODEL must use a :free model (or openrouter/free) when OPENROUTER_API_KEY is configured.',
     });
   });
 
@@ -168,7 +236,7 @@ describe('Vercel AI Gateway vision configuration', () => {
       provider: 'openai-compatible',
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
       apiKey: 'openrouter-key',
-      model: 'minimax/minimax-m3:free',
+      model: 'google/gemma-4-31b-it:free',
     });
   });
 
@@ -292,6 +360,29 @@ describe('Vercel AI Gateway transcription transport', () => {
           })) as typeof fetch,
       }),
     ).rejects.toMatchObject({ code: 'ASR_MODEL_UNAVAILABLE', recoverable: false });
+  });
+
+  it('reports a Gateway insufficient-funds 402 as a non-retryable account gate', async () => {
+    await expect(
+      transcribeViaGateway({
+        wav: new Uint8Array([1, 2, 3, 4]),
+        endpoint: 'https://ai-gateway.vercel.sh/v4/ai/transcription-model',
+        token: 'oidc-test-token',
+        authMethod: 'oidc',
+        model: 'openai/gpt-4o-transcribe',
+        fetchImpl: (async () =>
+          new Response(
+            JSON.stringify({
+              error: { message: 'add credits at a private team url', type: 'insufficient_funds' },
+            }),
+            { status: 402, headers: { 'content-type': 'application/json' } },
+          )) as typeof fetch,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ASR_MODEL_UNAVAILABLE',
+      recoverable: false,
+      reason: 'insufficient_funds',
+    });
   });
 
   it('maps Gateway rate limiting onto the retryable ASR error', async () => {
