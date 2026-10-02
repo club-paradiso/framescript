@@ -22,10 +22,12 @@ import {
   FrameScriptError,
   classifyHttpFailure,
   isAbort,
+  parseRetryAfter,
   validateVisionAnalysis,
   withRetry,
   type AsrResult,
   type FrameScriptErrorCode,
+  type ProviderFailureReason,
   type VisionWindowAnalysis,
 } from '@/core';
 
@@ -64,6 +66,8 @@ export const UNREACHABLE_CAPABILITIES: Capabilities = {
 interface ApiErrorBody {
   code?: string;
   message?: string;
+  reason?: ProviderFailureReason;
+  retryAfterSeconds?: number;
 }
 
 const KNOWN_CODES = new Set<string>([
@@ -111,6 +115,67 @@ const asrRunCircuits = new WeakMap<AbortSignal, FrameScriptError>();
 const visionRunCircuits = new WeakMap<AbortSignal, FrameScriptError>();
 
 /**
+ * Shared rate-limit coordination across workers for the same run AbortSignal.
+ * When one worker receives a 429, all workers in the run pause to prevent
+ * request storms against active provider quotas.
+ */
+const asrRateLimitUntil = new WeakMap<AbortSignal, number>();
+const visionRateLimitUntil = new WeakMap<AbortSignal, number>();
+
+async function awaitRateLimitPause(
+  signal: AbortSignal | undefined,
+  map: WeakMap<AbortSignal, number>,
+): Promise<void> {
+  if (!signal) return;
+  const pauseUntil = map.get(signal);
+  if (!pauseUntil) return;
+  const remainingMs = pauseUntil - Date.now();
+  if (remainingMs <= 0) return;
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(
+        new FrameScriptError({
+          code: 'ANALYSIS_ABORTED',
+          detail: 'aborted during rate limit pause',
+        }),
+      );
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, remainingMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(
+        new FrameScriptError({
+          code: 'ANALYSIS_ABORTED',
+          detail: 'aborted during rate limit pause',
+        }),
+      );
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function recordRateLimitPause(
+  signal: AbortSignal | undefined,
+  map: WeakMap<AbortSignal, number>,
+  error: unknown,
+): void {
+  if (!signal || !FrameScriptError.is(error)) return;
+  if (error.code === 'ASR_RATE_LIMITED' || error.code === 'VISION_RATE_LIMITED') {
+    const pauseSeconds = error.retryAfterSeconds ?? 2;
+    const pauseUntil = Date.now() + Math.max(1000, pauseSeconds * 1000);
+    const current = map.get(signal) ?? 0;
+    if (pauseUntil > current) {
+      map.set(signal, pauseUntil);
+    }
+  }
+}
+
+/**
  * Turns a failed response into a typed error.
  *
  * The server's own code is trusted when it is one FrameScript defines;
@@ -132,10 +197,20 @@ async function toError(response: Response, kind: 'asr' | 'vision'): Promise<Fram
     : code === 'ASR_RATE_LIMITED' || code === 'VISION_RATE_LIMITED'
       ? true
       : classified.retryable;
+
+  const retryHeader = response.headers.get('retry-after');
+  const retryAfterSeconds =
+    parseRetryAfter(retryHeader) ??
+    (typeof body.retryAfterSeconds === 'number' && Number.isFinite(body.retryAfterSeconds)
+      ? Math.max(0, Math.min(120, Math.round(body.retryAfterSeconds)))
+      : undefined);
+
   return new FrameScriptError({
     code,
     detail: `${response.status} ${body.message ?? response.statusText}`.slice(0, 200),
     recoverable,
+    ...(body.reason ? { reason: body.reason } : {}),
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
   });
 }
 
@@ -195,9 +270,13 @@ export async function transcribeWindow(
   const openCircuit = existingCircuit(request.signal, asrRunCircuits);
   if (openCircuit) throw openCircuit;
 
+  await awaitRateLimitPause(request.signal, asrRateLimitUntil);
+
   try {
     return await withRetry(
       async () => {
+        await awaitRateLimitPause(request.signal, asrRateLimitUntil);
+
         const form = new FormData();
         const buffer = new ArrayBuffer(request.wav.byteLength);
         new Uint8Array(buffer).set(request.wav);
@@ -211,7 +290,11 @@ export async function transcribeWindow(
           body: form,
           ...(request.signal ? { signal: request.signal } : {}),
         });
-        if (!response.ok) throw await toError(response, 'asr');
+        if (!response.ok) {
+          const error = await toError(response, 'asr');
+          recordRateLimitPause(request.signal, asrRateLimitUntil, error);
+          throw error;
+        }
 
         const body = (await response.json()) as {
           text?: unknown;
@@ -242,9 +325,16 @@ export async function transcribeWindow(
           ...(segments.length > 0 ? { segments } : {}),
         };
       },
-      { attempts: 3, ...(request.signal ? { signal: request.signal } : {}) },
+      {
+        attempts: 3,
+        ...(request.signal ? { signal: request.signal } : {}),
+        onRetry: (err) => {
+          recordRateLimitPause(request.signal, asrRateLimitUntil, err);
+        },
+      },
     );
   } catch (error) {
+    recordRateLimitPause(request.signal, asrRateLimitUntil, error);
     rememberDeterministicFailure(request.signal, asrRunCircuits, error);
     throw error;
   }
@@ -267,9 +357,13 @@ export async function analyzeFrames(
   const openCircuit = existingCircuit(request.signal, visionRunCircuits);
   if (openCircuit) throw openCircuit;
 
+  await awaitRateLimitPause(request.signal, visionRateLimitUntil);
+
   try {
     return await withRetry(
       async () => {
+        await awaitRateLimitPause(request.signal, visionRateLimitUntil);
+
         const response = await fetch('/api/analyze-frame', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -289,7 +383,11 @@ export async function analyzeFrames(
           }),
           ...(request.signal ? { signal: request.signal } : {}),
         });
-        if (!response.ok) throw await toError(response, 'vision');
+        if (!response.ok) {
+          const error = await toError(response, 'vision');
+          recordRateLimitPause(request.signal, visionRateLimitUntil, error);
+          throw error;
+        }
 
         const body = (await response.json()) as { analysis?: unknown };
         if (!body.analysis) return null;
@@ -304,9 +402,16 @@ export async function analyzeFrames(
         }
         return analysis;
       },
-      { attempts: 2, ...(request.signal ? { signal: request.signal } : {}) },
+      {
+        attempts: 2,
+        ...(request.signal ? { signal: request.signal } : {}),
+        onRetry: (err) => {
+          recordRateLimitPause(request.signal, visionRateLimitUntil, err);
+        },
+      },
     );
   } catch (error) {
+    recordRateLimitPause(request.signal, visionRateLimitUntil, error);
     rememberDeterministicFailure(request.signal, visionRunCircuits, error);
     throw error;
   }

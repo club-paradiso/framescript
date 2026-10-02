@@ -107,7 +107,14 @@ function env(name: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function isFreeOpenRouterModel(model: string): boolean {
+export const VERIFIED_FREE_OPENROUTER_VISION_MODELS: readonly string[] = [
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'qwen/qwen3.8-27b:free',
+  'openrouter/free',
+];
+
+export function isFreeOpenRouterModel(model: string): boolean {
   return model.endsWith(':free') || model === 'openrouter/free';
 }
 

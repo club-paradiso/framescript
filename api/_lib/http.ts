@@ -14,7 +14,12 @@
  */
 
 import { LIMITS } from './config.js';
-import { describeError, errorDetail, FrameScriptError } from '../../src/utils/errors.js';
+import {
+  describeError,
+  errorDetail,
+  FrameScriptError,
+  type FrameScriptErrorCode,
+} from '../../src/utils/errors.js';
 import { isAbort } from '../../src/ai/retry.js';
 
 export function json(
@@ -41,8 +46,11 @@ export function tooLarge(detail: string): Response {
   return json({ code: 'MESSAGE_INVALID', message: detail }, 413);
 }
 
-export function badRequest(detail: string): Response {
-  return json({ code: 'MESSAGE_INVALID', message: detail }, 400);
+export function badRequest(
+  detail: string,
+  code: FrameScriptErrorCode = 'MESSAGE_INVALID',
+): Response {
+  return json({ code, message: detail }, 400);
 }
 
 /**
@@ -87,7 +95,23 @@ export function errorResponse(error: unknown): Response {
   // text. It tells an operator which account or routing gate refused the
   // request without requiring access to the server's runtime logs.
   const reason = FrameScriptError.is(error) ? error.reason : undefined;
-  return json({ code, message, ...(reason ? { reason } : {}) }, status);
+  const retryAfterSeconds = FrameScriptError.is(error) ? error.retryAfterSeconds : undefined;
+
+  const extraHeaders: Record<string, string> = {};
+  if (rateLimited && retryAfterSeconds !== undefined && retryAfterSeconds > 0) {
+    extraHeaders['retry-after'] = String(Math.ceil(retryAfterSeconds));
+  }
+
+  return json(
+    {
+      code,
+      message,
+      ...(reason ? { reason } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+    },
+    status,
+    extraHeaders,
+  );
 }
 
 /** Rejects a body larger than the limit before it is buffered. */

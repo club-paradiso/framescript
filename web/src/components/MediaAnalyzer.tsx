@@ -392,6 +392,9 @@ export function MediaAnalyzer({
               {outcome.notices.map((notice) => (
                 <li className="warning" key={notice.code}>
                   {notice.message}
+                  {notice.retryAfterSeconds !== undefined && notice.retryAfterSeconds > 0
+                    ? ` Retry suggested in ${notice.retryAfterSeconds}s.`
+                    : ''}
                 </li>
               ))}
             </ul>

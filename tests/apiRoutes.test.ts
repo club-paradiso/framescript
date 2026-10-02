@@ -258,6 +258,132 @@ describe('POST /api/transcribe', () => {
     const response = await transcribe(transcribeRequest());
     expect(response.headers.get('cache-control')).toMatch(/no-store/);
   });
+
+  it('returns ASR_BAD_REQUEST on invalid audio input instead of generic error', async () => {
+    configureAsr();
+    const response = await transcribe(transcribeRequest({ wav: new Uint8Array(10) }));
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe('ASR_BAD_REQUEST');
+  });
+
+  it('forwards Retry-After header and retryAfterSeconds on 429 rate limit', async () => {
+    configureAsr();
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'Too many requests' } }), {
+          status: 429,
+          headers: { 'content-type': 'application/json', 'retry-after': '30' },
+        }),
+    ) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('30');
+    const body = (await response.json()) as { code: string; retryAfterSeconds?: number };
+    expect(body.code).toBe('ASR_RATE_LIMITED');
+    expect(body.retryAfterSeconds).toBe(30);
+  });
+
+  it('falls back to cheaper openai/gpt-4o-mini-transcribe when gpt-4o-transcribe fails on Gateway', async () => {
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      callCount++;
+      const headers = new Headers(init?.headers);
+      const model = headers.get('ai-model-id');
+      if (model === 'openai/gpt-4o-transcribe') {
+        return new Response(
+          JSON.stringify({ error: { message: 'Model unavailable', type: 'model_unavailable' } }),
+          { status: 503, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (model === 'openai/gpt-4o-mini-transcribe') {
+        return new Response(
+          JSON.stringify({
+            text: 'Fallback transcript succeeds.',
+            language: 'en',
+            segments: [{ start: 0, end: 1, text: 'Fallback transcript succeeds.' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('unexpected', { status: 500 });
+    }) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    expect(response.status).toBe(200);
+    expect(callCount).toBe(2);
+    const body = (await response.json()) as { text: string; model: string };
+    expect(body.text).toBe('Fallback transcript succeeds.');
+    expect(body.model).toBe('openai/gpt-4o-mini-transcribe');
+  });
+
+  it('does not fall back to mini transcribe when Gateway returns account-level refusal', async () => {
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      return new Response(
+        JSON.stringify({
+          error: { message: 'Verification needed', type: 'customer_verification_required' },
+        }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    expect(response.status).toBe(503);
+    expect(callCount).toBe(1);
+    const body = (await response.json()) as { code: string; reason?: string };
+    expect(body.code).toBe('ASR_MODEL_UNAVAILABLE');
+    expect(body.reason).toBe('customer_verification_required');
+  });
+
+  it('does not fall back to mini transcribe on rate limits (429) to avoid multiplying load', async () => {
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      return new Response(
+        JSON.stringify({ error: { message: 'Too many requests' } }),
+        { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '30' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    expect(response.status).toBe(429);
+    expect(callCount).toBe(1);
+    const body = (await response.json()) as { code: string; retryAfterSeconds?: number };
+    expect(body.code).toBe('ASR_RATE_LIMITED');
+    expect(body.retryAfterSeconds).toBe(30);
+  });
+
+  it('refuses automatic ASR fallback when FRAMESCRIPT_DISABLE_ASR_FALLBACK=1', async () => {
+    process.env.AI_GATEWAY_API_KEY = SECRET;
+    process.env.FRAMESCRIPT_DISABLE_ASR_FALLBACK = '1';
+    delete process.env.FRAMESCRIPT_ASR_API_KEY;
+
+    let callCount = 0;
+    globalThis.fetch = vi.fn(async () => {
+      callCount++;
+      return new Response(
+        JSON.stringify({ error: { message: 'Model unavailable', code: 'model_unavailable' } }),
+        { status: 503, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await transcribe(transcribeRequest());
+    expect(response.status).toBe(503);
+    expect(callCount).toBe(1);
+    delete process.env.FRAMESCRIPT_DISABLE_ASR_FALLBACK;
+  });
 });
 
 describe('POST /api/analyze-frame', () => {
@@ -359,6 +485,132 @@ describe('POST /api/analyze-frame', () => {
     const text = await (await analyzeFrame(frameRequest())).text();
     expect(text).not.toContain(SECRET);
     expect(text).not.toContain('invalid x-api-key');
+  });
+
+  it('returns VISION_BAD_REQUEST on invalid frame input instead of generic error', async () => {
+    configureVision();
+    const response = await analyzeFrame(frameRequest({ frames: [] }));
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { code: string };
+    expect(body.code).toBe('VISION_BAD_REQUEST');
+  });
+
+  it('falls back across verified free OpenRouter models when primary free model fails', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+
+    const attemptedModels: string[] = [];
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const parsed = JSON.parse(String(init?.body)) as { model: string };
+      attemptedModels.push(parsed.model);
+      if (parsed.model === 'google/gemma-4-31b-it:free') {
+        return new Response(
+          JSON.stringify({ error: { message: 'Rate limited', code: 429 } }),
+          { status: 429, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  actions: [
+                    { offsetMs: 0, description: 'Sun rises', participants: [], confidence: 'high' },
+                  ],
+                  characters: [],
+                  settingChanges: [],
+                  text: [],
+                  uncertainties: [],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await analyzeFrame(frameRequest());
+    expect(response.status).toBe(200);
+    expect(attemptedModels[0]).toBe('google/gemma-4-31b-it:free');
+    expect(attemptedModels[1]).toBe('google/gemma-4-26b-a4b-it:free');
+    const body = (await response.json()) as { model: string };
+    expect(body.model).toBe('google/gemma-4-26b-a4b-it:free');
+  });
+
+  it('routes to openrouter/free requiring image parts and strictly validating schema', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
+    process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL = 'openrouter/free';
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+
+    let receivedBody: Record<string, unknown> | undefined;
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      receivedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  actions: [
+                    { offsetMs: 50, description: 'Character speaks', participants: [], confidence: 'high' },
+                  ],
+                  characters: [],
+                  settingChanges: [],
+                  text: [],
+                  uncertainties: [],
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await analyzeFrame(frameRequest());
+    expect(response.status).toBe(200);
+    expect(receivedBody?.model).toBe('openrouter/free');
+
+    // Invariant: Request MUST contain image_url parts
+    const messages = receivedBody?.messages as { role: string; content: { type: string }[] }[];
+    const userMsg = messages.find((m) => m.role === 'user');
+    const imageParts = userMsg?.content.filter((p) => p.type === 'image_url');
+    expect(imageParts?.length).toBeGreaterThan(0);
+
+    const body = (await response.json()) as { model: string; analysis: { actions: unknown[] } };
+    expect(body.model).toBe('openrouter/free');
+    expect(body.analysis.actions).toHaveLength(1);
+    delete process.env.FRAMESCRIPT_OPENROUTER_VISION_MODEL;
+  });
+
+  it('terminates fallback loop cleanly without infinite retry when all free fallbacks fail', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
+    delete process.env.FRAMESCRIPT_VISION_API_KEY;
+
+    let callCount = 0;
+    const attemptedModels: string[] = [];
+    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      callCount++;
+      const parsed = JSON.parse(String(init?.body)) as { model: string };
+      attemptedModels.push(parsed.model);
+      return new Response(
+        JSON.stringify({ error: { message: 'Provider internal error', code: 500 } }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await analyzeFrame(frameRequest());
+    expect(response.status).toBe(502);
+    // 1 primary + 3 fallbacks = 4 total attempts, no infinite loop
+    expect(callCount).toBe(4);
+    expect(attemptedModels).toEqual([
+      'google/gemma-4-31b-it:free',
+      'google/gemma-4-26b-a4b-it:free',
+      'qwen/qwen3.8-27b:free',
+      'openrouter/free',
+    ]);
   });
 });
 

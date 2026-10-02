@@ -14,7 +14,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { isError, readVisionConfig, LIMITS } from './_lib/config.js';
+import {
+  isError,
+  readVisionConfig,
+  LIMITS,
+  VERIFIED_FREE_OPENROUTER_VISION_MODELS,
+  isFreeOpenRouterModel,
+} from './_lib/config.js';
 import {
   badRequest,
   declaredTooLarge,
@@ -27,6 +33,8 @@ import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
 import { AnthropicVisionProvider } from '../src/ai/providers/anthropic.js';
 import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompatibleVision.js';
 import { fromBase64 } from '../src/utils/base64.js';
+import { FrameScriptError } from '../src/utils/errors.js';
+import { isAbort } from '../src/ai/retry.js';
 import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types.js';
 
 export const config = { maxDuration: 60 };
@@ -64,16 +72,20 @@ export async function POST(request: Request): Promise<Response> {
   try {
     payload = (await request.json()) as RequestPayload;
   } catch {
-    return badRequest('Expected a JSON body.');
+    return badRequest('Expected a JSON body.', 'VISION_BAD_REQUEST');
   }
 
   const start = finiteNumber(payload.start);
   const end = finiteNumber(payload.end);
-  if (start === null || end === null || end <= start) return badRequest('Invalid window range.');
+  if (start === null || end === null || end <= start) {
+    return badRequest('Invalid window range.', 'VISION_BAD_REQUEST');
+  }
 
   const framesResult = parseFrames(payload.frames, start, end);
-  if ('error' in framesResult) return badRequest(framesResult.error);
-  if (framesResult.frames.length === 0) return badRequest('At least one frame is required.');
+  if ('error' in framesResult) return badRequest(framesResult.error, 'VISION_BAD_REQUEST');
+  if (framesResult.frames.length === 0) {
+    return badRequest('At least one frame is required.', 'VISION_BAD_REQUEST');
+  }
 
   const provider: VisionAnalysisProvider =
     vision.provider === 'anthropic'
@@ -106,9 +118,56 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
-    const analysis = await provider.analyzeWindow(windowRequest);
+    let analysis;
+    let effectiveModel = vision.model;
+    try {
+      analysis = await provider.analyzeWindow(windowRequest);
+    } catch (primaryError) {
+      const isAccountGate =
+        FrameScriptError.is(primaryError) &&
+        (primaryError.reason === 'payment_required' ||
+          primaryError.reason === 'insufficient_funds' ||
+          primaryError.reason === 'customer_verification_required');
+      const isOpenRouterFree =
+        vision.provider === 'openai-compatible' && isFreeOpenRouterModel(vision.model);
+
+      if (isOpenRouterFree && !isAccountGate && !isAbort(primaryError)) {
+        const fallbacks = VERIFIED_FREE_OPENROUTER_VISION_MODELS.filter(
+          (m) => m !== vision.model,
+        );
+        let fallbackSucceeded = false;
+        for (const fallbackModel of fallbacks) {
+          if (request.signal?.aborted) break;
+          console.warn(
+            `[framescript-api] Primary free vision model ${vision.model} failed, attempting verified free fallback ${fallbackModel}`,
+          );
+          try {
+            const fallbackProvider = new OpenAiCompatibleVisionProvider({
+              apiKey: vision.apiKey,
+              endpoint: vision.endpoint,
+              model: fallbackModel,
+              maxFramesPerRequest: LIMITS.maxFramesPerRequest,
+              ...(vision.requestOptions ? { requestOptions: vision.requestOptions } : {}),
+            });
+            analysis = await fallbackProvider.analyzeWindow(windowRequest);
+            effectiveModel = fallbackModel;
+            fallbackSucceeded = true;
+            break;
+          } catch (fallbackError) {
+            console.warn(
+              `[framescript-api] Free vision fallback ${fallbackModel} failed:`,
+              fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+            );
+          }
+        }
+        if (!fallbackSucceeded) throw primaryError;
+      } else {
+        throw primaryError;
+      }
+    }
+
     if (!analysis) return json({ start, end, analysis: null });
-    return json({ start, end, analysis, provider: vision.provider, model: vision.model });
+    return json({ start, end, analysis, provider: vision.provider, model: effectiveModel });
   } catch (error) {
     return errorResponse(error);
   }

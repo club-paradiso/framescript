@@ -30,19 +30,19 @@ function parseAllowlist(value, fallback) {
 
 const allowedAsrProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_ASR_PROVIDERS,
-  'vercel-ai-gateway',
+  'vercel-ai-gateway,openai-compatible',
 );
 const allowedVisionProviders = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_VISION_PROVIDERS,
-  'vercel-ai-gateway',
+  'vercel-ai-gateway,openai-compatible',
 );
 const allowedAsrModels = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_ASR_MODELS,
-  'openai/gpt-4o-transcribe',
+  'openai/gpt-4o-transcribe,openai/gpt-4o-mini-transcribe,whisper-1',
 );
 const allowedVisionModels = parseAllowlist(
   process.env.FRAMESCRIPT_SMOKE_VISION_MODELS,
-  'stealth/pixel-canary',
+  'stealth/pixel-canary,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,qwen/qwen3.8-27b:free,openrouter/free',
 );
 
 /** Public, unauthenticated model catalogs used to prove vision is $0. */

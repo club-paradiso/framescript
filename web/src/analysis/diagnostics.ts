@@ -74,7 +74,7 @@ export interface DiagnosticsReport {
     coverage: AnalysisOutcome['coverage'];
     requests: AnalysisOutcome['requests'];
     audioPipeline: AudioPipelineDiagnostic;
-    notices: { code: string; detail?: string }[];
+    notices: { code: string; detail?: string; reason?: string }[];
   };
 }
 
@@ -232,7 +232,11 @@ export function buildDiagnostics(input: DiagnosticsInput): DiagnosticsReport {
       audioPipeline: describeAudioPipeline(input.outcome, input.capabilities),
       notices: input.outcome.notices.map((notice) => {
         const detail = sanitizeDetail(notice.detail);
-        return { code: notice.code, ...(detail ? { detail } : {}) };
+        return {
+          code: notice.code,
+          ...(detail ? { detail } : {}),
+          ...(notice.reason ? { reason: notice.reason } : {}),
+        };
       }),
     };
   }

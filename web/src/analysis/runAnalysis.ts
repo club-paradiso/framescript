@@ -27,6 +27,7 @@
 import {
   FrameScriptError,
   describeError,
+  describeFailureReason,
   encodeAsrWindow,
   errorDetail,
   isAbort,
@@ -38,6 +39,7 @@ import {
   type AnalysisFidelity,
   type EvidenceEvent,
   type FrameScriptErrorCode,
+  type ProviderFailureReason,
   type SoundEvidence,
   type SpeakerEvidence,
   type SpeechEvidence,
@@ -93,6 +95,9 @@ export interface AnalysisNotice {
   message: string;
   /** Developer-facing. Shown in diagnostics, never presented as the message. */
   detail?: string;
+  /** Allowlisted refusal reason if surfaced by provider. */
+  reason?: ProviderFailureReason;
+  retryAfterSeconds?: number;
 }
 
 export interface RequestTally {
@@ -211,12 +216,20 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
   let videoObservedMs = 0;
   let lastPhase: PhaseId = 'reading';
 
-  const note = (code: FrameScriptErrorCode, detail?: string) => {
+  const note = (code: FrameScriptErrorCode, detail?: string, error?: unknown) => {
     if (notices.some((notice) => notice.code === code)) return;
+    const reason = FrameScriptError.is(error) ? error.reason : undefined;
+    const retryAfterSeconds = FrameScriptError.is(error) ? error.retryAfterSeconds : undefined;
+    let message = describeError(new FrameScriptError({ code })).message;
+    if (reason) {
+      message = `${message} (${describeFailureReason(reason)})`;
+    }
     notices.push({
       code,
-      message: describeError(new FrameScriptError({ code })).message,
+      message,
       ...(detail ? { detail } : {}),
+      ...(reason ? { reason } : {}),
+      ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
     });
   };
   const report = (phase: PhaseId, ratio?: number, detail?: string) => {
@@ -345,7 +358,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
           asrRequests.failed++;
           consecutiveFailures++;
           const code = FrameScriptError.is(error) ? error.code : 'ASR_PROVIDER_FAILED';
-          note(code, errorDetail(error));
+          note(code, errorDetail(error), error);
           // Deterministic request/auth/model/validation errors cannot improve on
           // the next window. Stop immediately; transient failures get a small
           // bounded budget before local-only analysis continues.
@@ -471,7 +484,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
           visionRequests.failed++;
           consecutiveFailures++;
           const code = FrameScriptError.is(error) ? error.code : 'VISION_PROVIDER_FAILED';
-          note(code, errorDetail(error));
+          note(code, errorDetail(error), error);
           if (
             (FrameScriptError.is(error) && !error.recoverable) ||
             consecutiveFailures >= FAILURE_THRESHOLD

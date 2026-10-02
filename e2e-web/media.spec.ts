@@ -207,6 +207,51 @@ test('surfaces a provider outage without losing local analysis', async () => {
   await expect(analyzer().getByText(/\d+ speaker clusters/)).toBeVisible();
 });
 
+test('surfaces provider customer verification refusal clearly in the UI', async () => {
+  configureTranscription(provider);
+  provider.mode = 'verification-required';
+  await openStudioWithClip();
+
+  await page.getByRole('button', { name: 'Analyze', exact: true }).click();
+  await expect(summary().getByText('Analysis complete')).toBeVisible({ timeout: ANALYSIS_TIMEOUT });
+  await expect(
+    summary().getByText(/customer verification before inference is permitted/i),
+  ).toBeVisible();
+  await expect(analyzer().getByText(/\d+ speech regions/)).toBeVisible();
+});
+
+test('surfaces Retry-After guidance when provider rate limits the run', async () => {
+  configureTranscription(provider);
+  provider.mode = 'rate-limited';
+  provider.retryAfterSeconds = 5;
+  await openStudioWithClip();
+
+  await page.getByRole('button', { name: 'Analyze', exact: true }).click();
+  await expect(summary().getByText('Analysis complete')).toBeVisible({ timeout: ANALYSIS_TIMEOUT });
+  await expect(summary().getByText(/Retry suggested in 5s/i)).toBeVisible();
+});
+
+test('renders analysis controls and notices correctly across viewports (1440, 1280, 768, 390)', async () => {
+  configureTranscription(provider);
+  provider.mode = 'verification-required';
+  await openStudioWithClip();
+
+  for (const { width, height } of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize({ width, height });
+    const scenesTab = page.getByRole('tab', { name: 'Scenes' });
+    if (await scenesTab.isVisible()) {
+      await scenesTab.click();
+    }
+    await expect(page.getByRole('button', { name: 'Analyze', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Analyze media' })).toBeVisible();
+  }
+});
+
 test('stops cleanly when the run is cancelled', async () => {
   configureTranscription(provider);
   await openStudioWithClip();

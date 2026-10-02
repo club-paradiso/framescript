@@ -29,6 +29,7 @@ import {
 import { transcribeViaGateway } from './_lib/gatewayAsr.js';
 import { toWebRequest, writeWebResponse } from './_lib/nodeAdapter.js';
 import { transcribeWav } from '../src/ai/providers/openaiCompatible.js';
+import { isAbort } from '../src/ai/retry.js';
 import { FrameScriptError } from '../src/utils/errors.js';
 
 export const config = { maxDuration: 60 };
@@ -49,21 +50,24 @@ export async function POST(request: Request): Promise<Response> {
   try {
     form = await request.formData();
   } catch {
-    return badRequest('Expected multipart/form-data with an "audio" part.');
+    return badRequest('Expected multipart/form-data with an "audio" part.', 'ASR_BAD_REQUEST');
   }
 
   const audio = form.get('audio');
-  if (!(audio instanceof Blob)) return badRequest('Missing "audio" part.');
-  if (audio.size === 0) return badRequest('Empty audio window.');
+  if (!(audio instanceof Blob)) return badRequest('Missing "audio" part.', 'ASR_BAD_REQUEST');
+  if (audio.size === 0) return badRequest('Empty audio window.', 'ASR_BAD_REQUEST');
   if (audio.size > LIMITS.maxAudioBytes) return tooLarge('Audio window exceeds the size limit.');
 
   const startMs = numberField(form, 'startMs');
   const endMs = numberField(form, 'endMs');
   if (startMs === null || endMs === null || endMs <= startMs) {
-    return badRequest('Invalid window timestamps.');
+    return badRequest('Invalid window timestamps.', 'ASR_BAD_REQUEST');
   }
   if (endMs - startMs > LIMITS.maxWindowMs) {
-    return badRequest(`Window longer than ${LIMITS.maxWindowMs} ms; split it before sending.`);
+    return badRequest(
+      `Window longer than ${LIMITS.maxWindowMs} ms; split it before sending.`,
+      'ASR_BAD_REQUEST',
+    );
   }
 
   const rawLanguage = form.get('language');
@@ -71,28 +75,85 @@ export async function POST(request: Request): Promise<Response> {
     typeof rawLanguage === 'string' && LANGUAGE.test(rawLanguage) ? rawLanguage : undefined;
 
   const wav = new Uint8Array(await audio.arrayBuffer());
-  if (!looksLikeWav(wav)) return badRequest('Audio part is not a WAV window.');
+  if (!looksLikeWav(wav)) return badRequest('Audio part is not a WAV window.', 'ASR_BAD_REQUEST');
+
+  const GATEWAY_ASR_FALLBACK_MODEL = 'openai/gpt-4o-mini-transcribe';
 
   try {
-    const result =
-      asr.provider === 'vercel-ai-gateway'
-        ? await transcribeViaGateway({
+    let result;
+    let effectiveModel = asr.model;
+
+    if (asr.provider === 'vercel-ai-gateway') {
+      try {
+        result = await transcribeViaGateway({
+          wav,
+          endpoint: asr.endpoint,
+          token: asr.apiKey,
+          authMethod: asr.gatewayAuthMethod ?? 'oidc',
+          model: asr.model,
+          ...(languageHint ? { languageHint } : {}),
+          ...(request.signal ? { signal: request.signal } : {}),
+        });
+      } catch (primaryError) {
+        if (isAbort(primaryError) || request.signal?.aborted) throw primaryError;
+
+        // Fallback to cheaper gpt-4o-mini-transcribe is permitted ONLY for model-specific
+        // outages (404 model_not_found, or 5xx provider failure on the primary model)
+        // on Vercel AI Gateway where attempting the cheaper backup is intentional.
+        // It strictly refuses fallback for:
+        // - account verification gates, insufficient funds, payment required
+        // - authentication failure (401/403)
+        // - bad request / unsupported parameters (400)
+        // - rate-limit conditions (429) to avoid multiplying requests under load
+        // - cancellations / aborts
+        // - when disabled by the operator (FRAMESCRIPT_DISABLE_ASR_FALLBACK=1)
+        const isAccountGate =
+          FrameScriptError.is(primaryError) &&
+          (primaryError.reason === 'payment_required' ||
+            primaryError.reason === 'insufficient_funds' ||
+            primaryError.reason === 'customer_verification_required');
+
+        const isModelOrOutageFailure =
+          FrameScriptError.is(primaryError) &&
+          (primaryError.code === 'ASR_MODEL_UNAVAILABLE' ||
+            primaryError.code === 'ASR_PROVIDER_FAILED');
+
+        const fallbackDisabled = process.env.FRAMESCRIPT_DISABLE_ASR_FALLBACK === '1';
+
+        const canFallback =
+          !fallbackDisabled &&
+          !isAccountGate &&
+          asr.model !== GATEWAY_ASR_FALLBACK_MODEL &&
+          isModelOrOutageFailure;
+
+        if (canFallback) {
+          console.warn(
+            `[framescript-api] Primary Gateway ASR model ${asr.model} failed, attempting cheaper verified fallback ${GATEWAY_ASR_FALLBACK_MODEL}`,
+          );
+          result = await transcribeViaGateway({
             wav,
             endpoint: asr.endpoint,
             token: asr.apiKey,
             authMethod: asr.gatewayAuthMethod ?? 'oidc',
-            model: asr.model,
-            ...(languageHint ? { languageHint } : {}),
-            ...(request.signal ? { signal: request.signal } : {}),
-          })
-        : await transcribeWav({
-            wav,
-            endpoint: asr.endpoint,
-            apiKey: asr.apiKey,
-            model: asr.model,
+            model: GATEWAY_ASR_FALLBACK_MODEL,
             ...(languageHint ? { languageHint } : {}),
             ...(request.signal ? { signal: request.signal } : {}),
           });
+          effectiveModel = GATEWAY_ASR_FALLBACK_MODEL;
+        } else {
+          throw primaryError;
+        }
+      }
+    } else {
+      result = await transcribeWav({
+        wav,
+        endpoint: asr.endpoint,
+        apiKey: asr.apiKey,
+        model: asr.model,
+        ...(languageHint ? { languageHint } : {}),
+        ...(request.signal ? { signal: request.signal } : {}),
+      });
+    }
 
     if (!result) return json({ start: startMs, end: endMs, text: '', segments: [] });
 
@@ -103,7 +164,7 @@ export async function POST(request: Request): Promise<Response> {
       ...(result.language ? { language: result.language } : {}),
       segments: result.segments ?? [],
       provider: asr.provider,
-      model: asr.model,
+      model: effectiveModel,
     });
   } catch (error) {
     if (FrameScriptError.is(error) && error.code === 'AI_RESPONSE_INVALID') {
