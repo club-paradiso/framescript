@@ -29,7 +29,13 @@ const MIME: Record<string, string> = {
   '.webmanifest': 'application/manifest+json',
 };
 
-export type ProviderMode = 'ok' | 'rate-limited' | 'server-error' | 'unauthorized';
+export type ProviderMode =
+  | 'ok'
+  | 'rate-limited'
+  | 'server-error'
+  | 'unauthorized'
+  | 'verification-required'
+  | 'model-not-found';
 
 export interface ProviderStub {
   origin: string;
@@ -38,6 +44,7 @@ export interface ProviderStub {
   readonly transcripts: string[];
   readonly calls: number;
   mode: ProviderMode;
+  retryAfterSeconds?: number;
   /** Clears the counters. The stub is shared, so each test starts from zero. */
   reset: () => void;
 }
@@ -46,7 +53,7 @@ export interface ProviderStub {
 export async function startProviderStub(): Promise<ProviderStub> {
   let calls = 0;
   const transcripts: string[] = [];
-  const state = { mode: 'ok' as ProviderMode };
+  const state = { mode: 'ok' as ProviderMode, retryAfterSeconds: 2 as number | undefined };
 
   const server = createServer((request, response) => {
     // Drain the upload; the stub does not decode audio, it only answers.
@@ -54,8 +61,33 @@ export async function startProviderStub(): Promise<ProviderStub> {
     request.on('end', () => {
       calls++;
       if (state.mode === 'rate-limited') {
-        response.writeHead(429, { 'content-type': 'text/plain' });
-        response.end('rate limited');
+        const retryAfter = state.retryAfterSeconds;
+        response.writeHead(429, {
+          'content-type': 'application/json',
+          ...(retryAfter !== undefined ? { 'retry-after': String(retryAfter) } : {}),
+        });
+        response.end(JSON.stringify({ error: { message: 'rate limited', code: 429 } }));
+        return;
+      }
+      if (state.mode === 'verification-required') {
+        response.writeHead(403, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: {
+              message: 'verification required',
+              type: 'customer_verification_required',
+            },
+          }),
+        );
+        return;
+      }
+      if (state.mode === 'model-not-found') {
+        response.writeHead(404, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            error: { message: 'model not found', type: 'model_not_found' },
+          }),
+        );
         return;
       }
       if (state.mode === 'server-error') {
@@ -93,10 +125,17 @@ export async function startProviderStub(): Promise<ProviderStub> {
     set mode(value: ProviderMode) {
       state.mode = value;
     },
+    get retryAfterSeconds() {
+      return state.retryAfterSeconds;
+    },
+    set retryAfterSeconds(value: number | undefined) {
+      state.retryAfterSeconds = value;
+    },
     reset() {
       calls = 0;
       transcripts.length = 0;
       state.mode = 'ok';
+      state.retryAfterSeconds = 2;
     },
   };
 }
@@ -108,6 +147,7 @@ export interface VisionStub {
   /** Frames received per request, so a test can assert the payload is bounded. */
   readonly frameCounts: number[];
   mode: ProviderMode;
+  retryAfterSeconds?: number;
   reset: () => void;
 }
 
@@ -115,7 +155,7 @@ export interface VisionStub {
 export async function startVisionStub(): Promise<VisionStub> {
   let calls = 0;
   const frameCounts: number[] = [];
-  const state = { mode: 'ok' as ProviderMode };
+  const state = { mode: 'ok' as ProviderMode, retryAfterSeconds: 2 as number | undefined };
 
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -123,9 +163,23 @@ export async function startVisionStub(): Promise<VisionStub> {
     request.on('end', () => {
       calls++;
       if (state.mode !== 'ok') {
-        response.writeHead(state.mode === 'rate-limited' ? 429 : 500, {
-          'content-type': 'text/plain',
-        });
+        if (state.mode === 'model-not-found') {
+          response.writeHead(404, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify({ error: { message: 'model not found', type: 'model_not_found' } }),
+          );
+          return;
+        }
+        if (state.mode === 'rate-limited') {
+          const retryAfter = state.retryAfterSeconds;
+          response.writeHead(429, {
+            'content-type': 'application/json',
+            ...(retryAfter !== undefined ? { 'retry-after': String(retryAfter) } : {}),
+          });
+          response.end(JSON.stringify({ error: { message: 'rate limited' } }));
+          return;
+        }
+        response.writeHead(500, { 'content-type': 'text/plain' });
         response.end('vision unavailable');
         return;
       }
@@ -182,10 +236,17 @@ export async function startVisionStub(): Promise<VisionStub> {
     set mode(value: ProviderMode) {
       state.mode = value;
     },
+    get retryAfterSeconds() {
+      return state.retryAfterSeconds;
+    },
+    set retryAfterSeconds(value: number | undefined) {
+      state.retryAfterSeconds = value;
+    },
     reset() {
       calls = 0;
       frameCounts.length = 0;
       state.mode = 'ok';
+      state.retryAfterSeconds = 2;
     },
   };
 }

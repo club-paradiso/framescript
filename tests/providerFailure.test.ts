@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHttpFailure, providerFailureReason } from '@/core';
+import {
+  FrameScriptError,
+  classifyHttpFailure,
+  describeFailureReason,
+  parseRetryAfter,
+  providerFailureReason,
+  retryDelayMs,
+  withRetry,
+} from '@/core';
 import { providerResponseError } from '../src/ai/retry';
 
 describe('provider failure classification', () => {
@@ -114,10 +122,102 @@ describe('provider failure classification', () => {
       'no_providers_available',
     );
     expect(providerFailureReason(404, { code: 'model_not_found' })).toBe('model_not_found');
+    expect(providerFailureReason(400, { code: 'unsupported_modality' })).toBe('unsupported_modality');
+    expect(providerFailureReason(400, { code: 'modality_not_supported' })).toBe('unsupported_modality');
     expect(providerFailureReason(402)).toBe('payment_required');
     // Arbitrary provider text is never promoted to a reason.
     expect(providerFailureReason(403, { type: 'Your key sk-live-123 was revoked' })).toBeUndefined();
     expect(providerFailureReason(500, { type: 'server_error' })).toBeUndefined();
     expect(providerFailureReason(429)).toBeUndefined();
+  });
+
+  it('parses Retry-After header for integer seconds and HTTP dates, clamping safely', () => {
+    expect(parseRetryAfter('12')).toBe(12);
+    expect(parseRetryAfter('  30  ')).toBe(30);
+    expect(parseRetryAfter('999999')).toBe(120); // Clamped to 120
+    expect(parseRetryAfter('-5')).toBeUndefined();
+    expect(parseRetryAfter('')).toBeUndefined();
+    expect(parseRetryAfter('not-a-number')).toBeUndefined();
+
+    // Future HTTP date
+    const futureDate = new Date(Date.now() + 45_000).toUTCString();
+    const parsedDateSeconds = parseRetryAfter(futureDate);
+    expect(parsedDateSeconds).toBeGreaterThanOrEqual(40);
+    expect(parsedDateSeconds).toBeLessThanOrEqual(46);
+  });
+
+  it('extracts Retry-After header into FrameScriptError.retryAfterSeconds', async () => {
+    const error = await providerResponseError(
+      new Response(JSON.stringify({ error: { message: 'Rate limit exceeded' } }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json',
+          'retry-after': '25',
+        },
+      }),
+      'asr',
+      'model=openai/gpt-4o-transcribe',
+    );
+
+    expect(error.code).toBe('ASR_RATE_LIMITED');
+    expect(error.recoverable).toBe(true);
+    expect(error.retryAfterSeconds).toBe(25);
+    expect(error.detail).toContain('retryAfter=25s');
+  });
+
+  it('honors retryAfterMs in retryDelayMs with bounded ceiling', () => {
+    const delay = retryDelayMs(1, { retryAfterMs: 4000, random: () => 0.5 });
+    // 4000 * (1 + 0.1 * 0.5) = 4000 * 1.05 = 4200
+    expect(delay).toBe(4200);
+
+    // Honors 20s provider backoff without prematurely capping to 8s
+    const twentySec = retryDelayMs(1, { retryAfterMs: 20000, random: () => 0 });
+    expect(twentySec).toBe(20000);
+
+    // Caps at MAX_RETRY_AFTER_SECONDS (120s)
+    const capped = retryDelayMs(1, { retryAfterMs: 200000, random: () => 0 });
+    expect(capped).toBe(120000);
+  });
+
+  it('invokes onRetry callback in withRetry before sleeping', async () => {
+    let attemptsCount = 0;
+    const retryCalls: { attempt: number; delay: number }[] = [];
+    const result = await withRetry(
+      async () => {
+        attemptsCount++;
+        if (attemptsCount < 2) {
+          throw new FrameScriptError({
+            code: 'ASR_RATE_LIMITED',
+            detail: '429 rate limit',
+            recoverable: true,
+            retryAfterSeconds: 5,
+          });
+        }
+        return 'success';
+      },
+      {
+        attempts: 3,
+        random: () => 0,
+        sleep: async () => {},
+        onRetry: (_err, attempt, delay) => {
+          retryCalls.push({ attempt, delay });
+        },
+      },
+    );
+
+    expect(result).toBe('success');
+    expect(attemptsCount).toBe(2);
+    expect(retryCalls).toHaveLength(1);
+    expect(retryCalls[0]?.attempt).toBe(1);
+    expect(retryCalls[0]?.delay).toBe(5000);
+  });
+
+  it('maps all allowlisted refusal reasons to human-friendly explanations', () => {
+    expect(describeFailureReason('payment_required')).toMatch(/insufficient credits/i);
+    expect(describeFailureReason('insufficient_funds')).toMatch(/insufficient credits/i);
+    expect(describeFailureReason('customer_verification_required')).toMatch(/verification/i);
+    expect(describeFailureReason('no_providers_available')).toMatch(/allowlist/i);
+    expect(describeFailureReason('model_not_found')).toMatch(/withdrawn/i);
+    expect(describeFailureReason('unsupported_modality')).toMatch(/modality/i);
   });
 });

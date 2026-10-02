@@ -40,7 +40,34 @@ const REASON_TOKENS: readonly ProviderFailureReason[] = [
   'payment_required',
   'no_providers_available',
   'model_not_found',
+  'unsupported_modality',
 ];
+
+export const MAX_RETRY_AFTER_SECONDS = 120;
+
+/**
+ * Parses a Retry-After header (either integer seconds or HTTP-date).
+ * Clamps to a sane range [0, 120] seconds to prevent rogue headers from
+ * hanging the worker. Returns undefined if unparseable.
+ */
+export function parseRetryAfter(header: string | null | undefined): number | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (!trimmed) return undefined;
+
+  if (/^[-+]?\d+(\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return seconds >= 0 ? Math.min(MAX_RETRY_AFTER_SECONDS, Math.round(seconds)) : undefined;
+  }
+
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    const diffSeconds = Math.ceil((dateMs - Date.now()) / 1000);
+    return Math.max(0, Math.min(120, diffSeconds));
+  }
+
+  return undefined;
+}
 
 /**
  * Picks the allowlisted refusal reason out of a provider's error type/code.
@@ -59,6 +86,9 @@ export function providerFailureReason(
     if (tokens.includes(reason)) return reason;
   }
   if (tokens.some((token) => token.includes('model_not_found'))) return 'model_not_found';
+  if (tokens.some((token) => token.includes('unsupported_modality') || token.includes('modality_not_supported'))) {
+    return 'unsupported_modality';
+  }
   if (status === 402) return 'payment_required';
   return undefined;
 }
@@ -133,17 +163,23 @@ export async function providerResponseError(
   const hint = await readProviderFailureHint(response);
   const { code, retryable } = classifyHttpFailure(response.status, kind, hint);
   const reason = providerFailureReason(response.status, hint);
+  const retryAfterHeader = response.headers.get('retry-after');
+  const retryAfterSeconds = parseRetryAfter(retryAfterHeader);
   const parts = [context, `upstreamStatus=${response.status}`];
   if (hint.type) parts.push(`type=${sanitizeToken(hint.type)}`);
   if (hint.code) parts.push(`code=${sanitizeToken(hint.code)}`);
   if (hint.statusCode !== undefined && hint.statusCode !== response.status) {
     parts.push(`reportedStatus=${hint.statusCode}`);
   }
+  if (retryAfterSeconds !== undefined) {
+    parts.push(`retryAfter=${retryAfterSeconds}s`);
+  }
   return new FrameScriptError({
     code,
     detail: parts.join(' '),
     recoverable: retryable,
     ...(reason ? { reason } : {}),
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
   });
 }
 
@@ -193,21 +229,37 @@ export interface RetryOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Injected in tests so backoff is deterministic. */
   random?: () => number;
+  /** Invoked before sleeping for a retry attempt. */
+  onRetry?: (error: unknown, attempt: number, delayMs: number) => void;
 }
 
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_BASE_DELAY = 500;
 const DEFAULT_MAX_DELAY = 8_000;
 
-/** Exponential backoff with full jitter, capped. */
+/** Exponential backoff with full jitter, capped, optionally honouring retryAfterMs. */
 export function retryDelayMs(
   attempt: number,
-  options: { baseDelayMs?: number; maxDelayMs?: number; random?: () => number } = {},
+  options: {
+    baseDelayMs?: number;
+    maxDelayMs?: number;
+    random?: () => number;
+    retryAfterMs?: number;
+  } = {},
 ): number {
   const base = options.baseDelayMs ?? DEFAULT_BASE_DELAY;
   const max = options.maxDelayMs ?? DEFAULT_MAX_DELAY;
-  const ceiling = Math.min(max, base * 2 ** Math.max(0, attempt - 1));
   const random = options.random ?? Math.random;
+
+  if (options.retryAfterMs !== undefined && options.retryAfterMs > 0) {
+    const jittered = options.retryAfterMs * (1 + 0.1 * random());
+    // Honor the provider's requested Retry-After, capped at MAX_RETRY_AFTER_SECONDS (120s)
+    // rather than the default exponential backoff ceiling (8s).
+    const maxRetryAfter = Math.max(max, MAX_RETRY_AFTER_SECONDS * 1000);
+    return Math.round(Math.min(maxRetryAfter, Math.max(base, jittered)));
+  }
+
+  const ceiling = Math.min(max, base * 2 ** Math.max(0, attempt - 1));
   return Math.round(ceiling * (0.5 + 0.5 * random()));
 }
 
@@ -256,14 +308,18 @@ export async function withRetry<T>(
         ? error.recoverable
         : isTransientNetworkError(error);
       if (!recoverable || attempt === attempts) throw error;
-      await sleep(
-        retryDelayMs(attempt, {
-          ...(options.baseDelayMs === undefined ? {} : { baseDelayMs: options.baseDelayMs }),
-          ...(options.maxDelayMs === undefined ? {} : { maxDelayMs: options.maxDelayMs }),
-          ...(options.random === undefined ? {} : { random: options.random }),
-        }),
-        options.signal,
-      );
+      const retryAfterSeconds =
+        FrameScriptError.is(error) && error.retryAfterSeconds !== undefined
+          ? error.retryAfterSeconds
+          : undefined;
+      const delay = retryDelayMs(attempt, {
+        ...(options.baseDelayMs === undefined ? {} : { baseDelayMs: options.baseDelayMs }),
+        ...(options.maxDelayMs === undefined ? {} : { maxDelayMs: options.maxDelayMs }),
+        ...(options.random === undefined ? {} : { random: options.random }),
+        ...(retryAfterSeconds !== undefined ? { retryAfterMs: retryAfterSeconds * 1000 } : {}),
+      });
+      options.onRetry?.(error, attempt, delay);
+      await sleep(delay, options.signal);
     }
   }
   throw lastError;
@@ -276,5 +332,12 @@ export function isAbort(error: unknown): boolean {
 
 /** A `fetch` that never reached the server. Worth exactly one more try. */
 export function isTransientNetworkError(error: unknown): boolean {
-  return error instanceof TypeError;
+  if (error instanceof TypeError) return true;
+  if (error instanceof Error) {
+    const name = error.name.toLowerCase();
+    const message = error.message.toLowerCase();
+    if (name === 'networkerror' || name === 'fetcherror') return true;
+    if (message.includes('network error') || message.includes('failed to fetch')) return true;
+  }
+  return false;
 }

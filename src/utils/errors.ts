@@ -64,7 +64,8 @@ export type ProviderFailureReason =
   | 'insufficient_funds'
   | 'customer_verification_required'
   | 'no_providers_available'
-  | 'model_not_found';
+  | 'model_not_found'
+  | 'unsupported_modality';
 
 export interface FrameScriptErrorInit {
   code: FrameScriptErrorCode;
@@ -75,6 +76,8 @@ export interface FrameScriptErrorInit {
   recoverable?: boolean;
   /** Allowlisted upstream refusal reason; see `ProviderFailureReason`. */
   reason?: ProviderFailureReason;
+  /** If the upstream provider suggested a Retry-After delay, in seconds. */
+  retryAfterSeconds?: number;
 }
 
 export class FrameScriptError extends Error {
@@ -82,6 +85,7 @@ export class FrameScriptError extends Error {
   readonly detail: string | undefined;
   readonly recoverable: boolean;
   readonly reason: ProviderFailureReason | undefined;
+  readonly retryAfterSeconds: number | undefined;
 
   constructor(init: FrameScriptErrorInit) {
     super(init.detail ? `${init.code}: ${init.detail}` : init.code, { cause: init.cause });
@@ -90,6 +94,7 @@ export class FrameScriptError extends Error {
     this.detail = init.detail;
     this.recoverable = init.recoverable ?? false;
     this.reason = init.reason;
+    this.retryAfterSeconds = init.retryAfterSeconds;
   }
 
   static is(value: unknown): value is FrameScriptError {
@@ -204,3 +209,21 @@ export function errorDetail(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return String(error);
 }
+
+/** Human-friendly, non-technical explanation of allowlisted refusal reasons. */
+export function describeFailureReason(reason: ProviderFailureReason): string {
+  switch (reason) {
+    case 'payment_required':
+    case 'insufficient_funds':
+      return 'The provider account has insufficient credits or an unpaid balance.';
+    case 'customer_verification_required':
+      return 'The deployment provider account requires customer verification before inference is permitted.';
+    case 'no_providers_available':
+      return 'The requested model or provider is blocked by the team allowlist or gateway policy.';
+    case 'model_not_found':
+      return 'The configured model is no longer available or was withdrawn upstream.';
+    case 'unsupported_modality':
+      return 'The selected model does not support the requested media modality.';
+  }
+}
+

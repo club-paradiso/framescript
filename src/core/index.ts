@@ -212,9 +212,11 @@ export {
 } from '../ai/evidenceMapping';
 export type { TranscriptMappingOptions, VisionMappingOptions } from '../ai/evidenceMapping';
 export {
+  MAX_RETRY_AFTER_SECONDS,
   classifyHttpFailure,
   isAbort,
   isTransientNetworkError,
+  parseRetryAfter,
   providerError,
   providerFailureReason,
   retryDelayMs,
@@ -254,8 +256,14 @@ export {
   slugify,
   textSimilarity,
 } from '../utils/text';
-export { FrameScriptError, describeError, errorDetail, userMessageFor } from '../utils/errors';
-export type { FrameScriptErrorCode } from '../utils/errors';
+export {
+  FrameScriptError,
+  describeError,
+  describeFailureReason,
+  errorDetail,
+  userMessageFor,
+} from '../utils/errors';
+export type { FrameScriptErrorCode, ProviderFailureReason } from '../utils/errors';
 
 // --- Pipeline ------------------------------------------------------------------
 export { buildScreenplay, collectLanguages, summarizeBeats } from './pipeline';
