@@ -28,24 +28,25 @@ import {
   FrameScriptError,
   describeError,
   describeFailureReason,
+  dialogueInWindow,
   encodeAsrWindow,
   errorDetail,
   isAbort,
   planSpeechWindows,
   secondsToMs,
   sliceWindow,
+  soundsInWindow,
   transcriptToEvidence,
   visionAnalysisToEvidence,
   type AnalysisFidelity,
   type EvidenceEvent,
   type FrameScriptErrorCode,
   type ProviderFailureReason,
-  type SoundEvidence,
   type SpeakerEvidence,
-  type SpeechEvidence,
   type SpeechRegion,
 } from '@/core';
 import {
+  DEFAULT_CONTACT_SHEET,
   analyzeAudioBuffer,
   decodeAudioTrack,
   loadMediaMetadata,
@@ -55,7 +56,9 @@ import {
 } from './localMediaAnalyzer';
 import { analyzeFrames, runBounded, transcribeWindow, type Capabilities } from './apiClient';
 import {
+  SHORT_MEDIA_MS,
   preferredSceneCaptureBudget,
+  sceneRequestBudget,
   selectSceneWindowsForAnalysis,
 } from './sceneWindowSelection';
 
@@ -155,8 +158,13 @@ export interface RunAnalysisOptions {
   /** Only honoured when capabilities report transcription as configured. */
   transcribe: boolean;
   sceneUnderstanding: boolean;
-  /** Hard ceiling on vision requests for this file. */
+  /**
+   * Base ceiling on vision requests for this file. Short media raises it toward
+   * `sceneCoverage`, never past `SHORT_MEDIA_MAX_REQUESTS`.
+   */
   maxSceneWindows: number;
+  /** Fraction of a short file to cover with contact sheets, 0 to 1. Default 1. */
+  sceneCoverage?: number;
   languageHint?: string;
   capabilities: Capabilities;
   onProgress: (progress: AnalysisProgress) => void;
@@ -388,6 +396,9 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
 
   // --- Picture -----------------------------------------------------------------
   let keyframeWindows: KeyframeWindow[] = [];
+  const contactSheetSpanMs =
+    DEFAULT_CONTACT_SHEET.columns * DEFAULT_CONTACT_SHEET.rows * DEFAULT_CONTACT_SHEET.tileIntervalMs;
+  let sceneRequestLimit = options.maxSceneWindows;
   if (options.analyzeVideo && options.video && !aborted()) {
     report('scanning', 0, `${options.scanRate}× scan`);
     // Candidate capture and network request budgets are deliberately separate.
@@ -395,15 +406,26 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
     // their semantic budget early and leave the rest of the timeline invisible
     // to the vision model. Keep a bounded denser local pool, then choose the
     // actual remote requests after the scan with temporal coverage guarantees.
+    sceneRequestLimit = sceneRequestBudget(
+      options.maxSceneWindows,
+      durationMs,
+      contactSheetSpanMs,
+      options.sceneCoverage ?? 1,
+    );
     const wantsKeyframes =
       options.sceneUnderstanding && options.capabilities.vision.configured
-        ? preferredSceneCaptureBudget(options.maxSceneWindows, durationMs)
+        ? preferredSceneCaptureBudget(sceneRequestLimit, durationMs)
         : 0;
 
     const scan = await scanVideoDuringPlayback(options.video, {
       fidelity: options.fidelity,
       scanRate: options.scanRate,
       maxKeyframeWindows: wantsKeyframes,
+      // Every window is one contact sheet; short media is covered end to end.
+      contactSheet: {
+        ...DEFAULT_CONTACT_SHEET,
+        continuous: durationMs > 0 && durationMs <= SHORT_MEDIA_MS,
+      },
       signal: options.signal,
       onProgress: (ratio) => report('scanning', ratio, `${options.scanRate}× scan`),
     });
@@ -442,7 +464,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
 
   // --- Scene understanding -----------------------------------------------------
   if (keyframeWindows.length > 0 && !aborted()) {
-    const selected = selectSceneWindowsForAnalysis(keyframeWindows, options.maxSceneWindows);
+    const selected = selectSceneWindowsForAnalysis(keyframeWindows, sceneRequestLimit);
     stats.keyframeWindows = selected.length;
 
     let completed = 0;
@@ -461,8 +483,8 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
             start: window.start,
             end: window.end,
             frames: window.frames,
-            dialogue: dialogueIn(events, window.start, window.end),
-            soundEvents: soundsIn(events, window.start, window.end),
+            dialogue: dialogueInWindow(events, window.start, window.end),
+            soundEvents: soundsInWindow(events, window.start, window.end),
             signal: options.signal,
           });
           consecutiveFailures = 0;
@@ -529,26 +551,6 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
     aborted: options.signal.aborted,
     lastPhase,
   };
-}
-
-function dialogueIn(events: readonly EvidenceEvent[], start: number, end: number) {
-  return events
-    .filter((event): event is SpeechEvidence => event.source === 'audio-asr')
-    .filter((event) => event.start < end && (event.end ?? event.start) > start)
-    .slice(0, 12)
-    .map((event) => ({
-      start: event.start,
-      ...(event.payload.speakerId ? { speakerId: event.payload.speakerId } : {}),
-      text: event.payload.text,
-    }));
-}
-
-function soundsIn(events: readonly EvidenceEvent[], start: number, end: number) {
-  return events
-    .filter((event): event is SoundEvidence => event.source === 'audio-event')
-    .filter((event) => event.start < end && (event.end ?? event.start) > start)
-    .slice(0, 12)
-    .map((event) => ({ start: event.start, kind: event.payload.kind }));
 }
 
 /** One-line summary for the source list. Uses measured values only. */

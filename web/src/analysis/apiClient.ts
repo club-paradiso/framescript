@@ -343,7 +343,14 @@ export async function transcribeWindow(
 export interface AnalyzeFramesRequest {
   start: number;
   end: number;
-  frames: { timestamp: number; base64: string; mimeType: string; width: number; height: number }[];
+  frames: {
+    timestamp: number;
+    base64: string;
+    mimeType: string;
+    width: number;
+    height: number;
+    sheet?: { columns: number; rows: number; tileTimestamps: number[] };
+  }[];
   dialogue: { start: number; speakerId?: string; text: string }[];
   soundEvents: { start: number; kind: string }[];
   requestOcr?: boolean;
@@ -376,6 +383,15 @@ export async function analyzeFrames(
               mimeType: frame.mimeType,
               width: frame.width,
               height: frame.height,
+              ...(frame.sheet
+                ? {
+                    sheet: {
+                      columns: frame.sheet.columns,
+                      rows: frame.sheet.rows,
+                      tileTimestamps: frame.sheet.tileTimestamps.map((t) => Math.round(t)),
+                    },
+                  }
+                : {}),
             })),
             dialogue: request.dialogue,
             soundEvents: request.soundEvents,

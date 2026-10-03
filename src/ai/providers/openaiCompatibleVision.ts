@@ -16,6 +16,7 @@ import type {
   VisionWindowAnalysis,
   VisionWindowRequest,
 } from '../types.js';
+import { describeFrameForPrompt } from '../types.js';
 import { extractJson } from '../validation.js';
 import {
   VISION_SYSTEM_PROMPT,
@@ -88,7 +89,7 @@ export class OpenAiCompatibleVisionProvider implements VisionAnalysisProvider {
     let frameBytes = 0;
     for (const frame of frames) {
       frameBytes += frame.data.byteLength;
-      content.push({ type: 'text', text: `Frame at +${frame.timestamp - request.start}ms:` });
+      content.push({ type: 'text', text: describeFrameForPrompt(frame, request.start) });
       content.push({
         type: 'image_url',
         image_url: { url: `data:${frame.mimeType};base64,${toBase64(frame.data)}` },

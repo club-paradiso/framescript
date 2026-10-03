@@ -62,12 +62,20 @@ bundle.
 | Sent                                                          | Never sent                     |
 | ------------------------------------------------------------- | ------------------------------ |
 | Speech windows the VAD detected, 16 kHz mono, 30 s at most    | The media file                 |
-| Up to 3 downscaled JPEG keyframes per selected window         | A frame stream, or every frame |
+| One downscaled JPEG contact sheet per selected window          | A frame stream, or every frame |
 | Dialogue text and sound labels for the window being described | Audio, to the vision provider  |
 
 Both stages are bounded per file: transcription plans windows against a total
 speech budget, and scene understanding is capped by an explicit control (off, up
 to 6 windows, or up to 12) that is separate from local observation fidelity.
+
+A window is one contact sheet: a 4x4 grid of 320 px tiles taken 250 ms apart,
+each stamped with its offset, so one request shows four seconds of motion
+instead of three isolated stills. A file under 5 minutes is sheeted end to end
+rather than only around cuts, because the moments that matter most — an
+injury, a held expression — often move least. Its budget then grows to cover
+half the file (key scenes) or all of it (extended), never past 48 requests.
+Longer files keep the 6 or 12 cap.
 Concurrency is capped at 2 for each. Repeated provider failures stop the stage
 rather than retrying into a wall, and only 429 and 5xx are retried at all.
 

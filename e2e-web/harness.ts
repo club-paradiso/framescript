@@ -146,6 +146,8 @@ export interface VisionStub {
   readonly calls: number;
   /** Frames received per request, so a test can assert the payload is bounded. */
   readonly frameCounts: number[];
+  /** Moments per request as the prompt states them: contact-sheet tiles count individually. */
+  readonly momentCounts: number[];
   mode: ProviderMode;
   retryAfterSeconds?: number;
   reset: () => void;
@@ -155,6 +157,7 @@ export interface VisionStub {
 export async function startVisionStub(): Promise<VisionStub> {
   let calls = 0;
   const frameCounts: number[] = [];
+  const momentCounts: number[] = [];
   const state = { mode: 'ok' as ProviderMode, retryAfterSeconds: 2 as number | undefined };
 
   const server = createServer((request, response) => {
@@ -185,13 +188,17 @@ export async function startVisionStub(): Promise<VisionStub> {
       }
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString()) as {
-          messages?: { content?: { type?: string }[] }[];
+          messages?: { content?: { type?: string; text?: string }[] }[];
         };
-        frameCounts.push(
-          (body.messages?.[0]?.content ?? []).filter((part) => part.type === 'image').length,
-        );
+        const content = body.messages?.[0]?.content ?? [];
+        frameCounts.push(content.filter((part) => part.type === 'image').length);
+        const stated = content
+          .map((part) => /FRAME COUNT: (\d+)/.exec(part.text ?? '')?.[1])
+          .find((value) => value !== undefined);
+        momentCounts.push(stated ? Number(stated) : 0);
       } catch {
         frameCounts.push(0);
+        momentCounts.push(0);
       }
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
@@ -227,6 +234,9 @@ export async function startVisionStub(): Promise<VisionStub> {
     get calls() {
       return calls;
     },
+    get momentCounts() {
+      return momentCounts;
+    },
     get frameCounts() {
       return frameCounts;
     },
@@ -245,6 +255,7 @@ export async function startVisionStub(): Promise<VisionStub> {
     reset() {
       calls = 0;
       frameCounts.length = 0;
+      momentCounts.length = 0;
       state.mode = 'ok';
       state.retryAfterSeconds = 2;
     },

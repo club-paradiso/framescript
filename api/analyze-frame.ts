@@ -35,7 +35,12 @@ import { OpenAiCompatibleVisionProvider } from '../src/ai/providers/openaiCompat
 import { fromBase64 } from '../src/utils/base64.js';
 import { FrameScriptError } from '../src/utils/errors.js';
 import { isAbort } from '../src/ai/retry.js';
-import type { VisionAnalysisProvider, VisionFrame, VisionWindowRequest } from '../src/ai/types.js';
+import type {
+  ContactSheetLayout,
+  VisionAnalysisProvider,
+  VisionFrame,
+  VisionWindowRequest,
+} from '../src/ai/types.js';
 
 export const config = { maxDuration: 60 };
 
@@ -48,7 +53,11 @@ interface FramePayload {
   mimeType?: unknown;
   width?: unknown;
   height?: unknown;
+  sheet?: unknown;
 }
+
+/** A sheet is a bounded grid; more tiles would only shrink each one. */
+const MAX_SHEET_TILES = 30;
 
 interface RequestPayload {
   start?: unknown;
@@ -238,10 +247,52 @@ function parseFrames(
     if (width <= 0 || height <= 0 || width > 4096 || height > 4096) {
       return { error: 'Frame dimensions are out of range.' };
     }
-    frames.push({ timestamp, data, mimeType, width, height });
+    const sheet = parseSheet(raw.sheet, start, end);
+    if (sheet && 'error' in sheet) return { error: sheet.error };
+    frames.push({ timestamp, data, mimeType, width, height, ...(sheet ? { sheet } : {}) });
   }
   frames.sort((a, b) => a.timestamp - b.timestamp);
   return { frames };
+}
+
+function parseSheet(
+  value: unknown,
+  start: number,
+  end: number,
+): ContactSheetLayout | { error: string } | undefined {
+  if (value === undefined || value === null) return undefined;
+  const raw = value as { columns?: unknown; rows?: unknown; tileTimestamps?: unknown };
+  const columns = finiteNumber(raw.columns);
+  const rows = finiteNumber(raw.rows);
+  if (
+    columns === null ||
+    rows === null ||
+    !Number.isInteger(columns) ||
+    !Number.isInteger(rows) ||
+    columns < 1 ||
+    rows < 1 ||
+    columns * rows > MAX_SHEET_TILES
+  ) {
+    return { error: 'Contact sheet layout is out of range.' };
+  }
+  if (!Array.isArray(raw.tileTimestamps) || raw.tileTimestamps.length === 0) {
+    return { error: 'Contact sheet tiles are missing.' };
+  }
+  if (raw.tileTimestamps.length > columns * rows) {
+    return { error: 'Contact sheet has more tiles than its grid.' };
+  }
+  const tileTimestamps: number[] = [];
+  for (const entry of raw.tileTimestamps) {
+    const t = finiteNumber(entry);
+    if (t === null || t < start || t > end) {
+      return { error: 'Contact sheet tile falls outside the window.' };
+    }
+    if (tileTimestamps.length > 0 && t < tileTimestamps[tileTimestamps.length - 1]!) {
+      return { error: 'Contact sheet tiles must be in time order.' };
+    }
+    tileTimestamps.push(t);
+  }
+  return { columns, rows, tileTimestamps };
 }
 
 function parseDialogue(value: unknown, start: number, end: number) {

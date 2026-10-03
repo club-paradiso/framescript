@@ -33,10 +33,13 @@ import {
   describeAudioPipeline,
   formatDiagnostics,
 } from '../analysis/diagnostics';
+import { SHORT_MEDIA_MAX_REQUESTS } from '../analysis/sceneWindowSelection';
 
 const APP_VERSION = '0.1.0';
 /** Scene-understanding budgets. Separate from local fidelity, on purpose. */
 const SCENE_BUDGETS = { off: 0, key: 6, extended: 12 } as const;
+/** Share of a short file each depth tries to describe with contact sheets. */
+const SCENE_COVERAGE = { off: 0, key: 0.5, extended: 1 } as const;
 type SceneDepth = keyof typeof SCENE_BUDGETS;
 
 const SPOKEN_LANGUAGES = [
@@ -119,6 +122,7 @@ export function MediaAnalyzer({
         ...(spokenLanguage === 'auto' ? {} : { languageHint: spokenLanguage }),
         sceneUnderstanding: canSeeScenes && sceneWindows > 0,
         maxSceneWindows: sceneWindows,
+        sceneCoverage: SCENE_COVERAGE[sceneDepth],
         capabilities: resolved,
         signal: controller.signal,
         onProgress: setProgress,
@@ -139,6 +143,7 @@ export function MediaAnalyzer({
     isVideo,
     onComplete,
     resolved,
+    sceneDepth,
     sceneWindows,
     scanRate,
     spokenLanguage,
@@ -334,7 +339,7 @@ export function MediaAnalyzer({
           </select>
           <p className="muted small">
             {canSeeScenes
-              ? `At most ${sceneWindows} requests for this file, each carrying up to 3 downscaled keyframes chosen around a cut or a sustained action. Never the video. The scene provider's own data-retention terms apply.`
+              ? `At most ${sceneWindows} requests for this file, or up to ${SHORT_MEDIA_MAX_REQUESTS} for a file under 5 minutes so ${sceneDepth === 'extended' ? 'all' : 'half'} of it can be described. Each request carries one downscaled contact sheet of up to 16 moments, four seconds of picture. Never the video. The scene provider's own data-retention terms apply.`
               : 'Unavailable: this deployment has no scene-understanding provider configured.'}
           </p>
         </div>

@@ -362,12 +362,16 @@ test('describes selected scenes without sending the video, and bounds the reques
     page.locator('.line--action', { hasText: 'pale block slides across the frame' }).first(),
   ).toBeVisible();
 
-  // Each request carried a handful of keyframes, never a frame stream.
+  // Each request carried one contact sheet, never a frame stream.
   expect(vision.frameCounts.length).toBe(vision.calls);
   for (const count of vision.frameCounts) {
     expect(count).toBeGreaterThan(0);
     expect(count).toBeLessThanOrEqual(3);
   }
+  // The sheet holds several consecutive moments, so the model sees motion
+  // between them rather than a lone still per request.
+  expect(Math.max(...vision.momentCounts)).toBeGreaterThan(1);
+  for (const moments of vision.momentCounts) expect(moments).toBeLessThanOrEqual(16);
   expect(externalRequests).toEqual([]);
 });
 

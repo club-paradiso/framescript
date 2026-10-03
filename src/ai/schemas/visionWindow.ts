@@ -9,6 +9,7 @@
 
 import { v, type Validator } from '../validation.js';
 import type { VisionWindowAnalysis, VisionWindowRequest } from '../types.js';
+import { frameMoments } from '../types.js';
 
 const confidence = v.literalUnion(['high', 'medium', 'low', 'unknown'] as const);
 
@@ -163,6 +164,7 @@ You receive an ORDERED SEQUENCE of frames sampled from one short window of a vid
 Your job is to describe what is OBSERVABLE, and how it PROGRESSES across the sequence.
 
 Rules:
+- An image may be a CONTACT SHEET: a grid of consecutive moments read left to right, top to bottom, each tile stamped with its offset. Treat every tile as one frame of the sequence and use the stamped offsets for offsetMs. Compare adjacent tiles closely; brief events such as a blow landing, a flash, a flinch, or a wound appearing may be visible in only one or two tiles.
 - Treat the frames as a continuous action, not as unrelated photographs. Describe progression ("reaches for the handle, hesitates, then opens it"), not a caption per frame.
 - An action entry represents a meaningful visible state change, not persistence. If a person remains in essentially the same pose, gaze, expression, or location across several frames, emit at most one action for that unchanged state.
 - Never restate the same state at successive offsets with filler such as "maintains", "continues", "remains", "still", or equivalent wording. If nothing screenplay-relevant changes, return zero actions rather than padding the list.
@@ -180,11 +182,15 @@ Rules:
 export function buildVisionUserPrompt(request: VisionWindowRequest): string {
   const lines: string[] = [];
   lines.push(`WINDOW: ${request.start}ms - ${request.end}ms (${request.end - request.start}ms)`);
-  lines.push(`FRAME COUNT: ${request.frames.length}`);
+  const moments = request.frames.flatMap(frameMoments);
+  const sheets = request.frames.filter((f) => f.sheet).length;
   lines.push(
-    `FRAME OFFSETS (ms after window start): ${request.frames
-      .map((f) => f.timestamp - request.start)
-      .join(', ')}`,
+    sheets > 0
+      ? `FRAME COUNT: ${moments.length} moments in ${request.frames.length} image(s), ${sheets} of them contact sheets`
+      : `FRAME COUNT: ${request.frames.length}`,
+  );
+  lines.push(
+    `FRAME OFFSETS (ms after window start): ${moments.map((t) => t - request.start).join(', ')}`,
   );
 
   if (request.currentSetting) lines.push(`ESTABLISHED SETTING: ${request.currentSetting}`);
