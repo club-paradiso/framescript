@@ -34,6 +34,7 @@ import {
   formatDiagnostics,
 } from '../analysis/diagnostics';
 import { SHORT_MEDIA_MAX_REQUESTS } from '../analysis/sceneWindowSelection';
+import { OVERVIEW_MAX_SHEETS } from '../analysis/twoPass';
 
 const APP_VERSION = '0.1.0';
 /** Scene-understanding budgets. Separate from local fidelity, on purpose. */
@@ -339,7 +340,7 @@ export function MediaAnalyzer({
           </select>
           <p className="muted small">
             {canSeeScenes
-              ? `At most ${sceneWindows} requests for this file, or up to ${SHORT_MEDIA_MAX_REQUESTS} for a file under 5 minutes so ${sceneDepth === 'extended' ? 'all' : 'half'} of it can be described. Each request carries one downscaled contact sheet of up to 16 moments, four seconds of picture. Never the video. The scene provider's own data-retention terms apply.`
+              ? `At most ${sceneWindows} requests for this file, or up to ${SHORT_MEDIA_MAX_REQUESTS} for a file under 5 minutes so ${sceneDepth === 'extended' ? 'all' : 'half'} of it can be described. Each request carries one downscaled contact sheet of up to 16 moments, four seconds of picture. Up to ${OVERVIEW_MAX_SHEETS} more requests first skim the whole file to find where to look closer and to keep labels consistent. Never the video. The scene provider's own data-retention terms apply.`
               : 'Unavailable: this deployment has no scene-understanding provider configured.'}
           </p>
         </div>

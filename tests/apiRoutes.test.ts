@@ -502,6 +502,50 @@ describe('POST /api/analyze-frame', () => {
     expect(sentBody).toContain('FRAME COUNT: 4 moments in 1 image(s), 1 of them contact sheets');
   });
 
+  it('forwards bounded continuity context to the provider', async () => {
+    configureVision();
+    let sentBody = '';
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      sentBody = String(init?.body ?? '');
+      return new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                actions: [],
+                characters: [],
+                settingChanges: [],
+                text: [],
+                uncertainties: [],
+              }),
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const response = await analyzeFrame(
+      frameRequest({
+        currentSetting: 'INT laundry',
+        knownCharacters: [
+          { id: 'man in black shirt', displayName: 'man in black shirt' },
+          { id: 'man in black shirt' },
+          { displayName: 42 },
+        ],
+        recentActions: ['a1', 'a2', 'a3', 'a4', 'a5', 7, '  '],
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(sentBody).toContain('ESTABLISHED SETTING: INT laundry');
+    expect(sentBody).toContain('KNOWN CHARACTER LABELS: man in black shirt');
+    expect(sentBody).not.toContain('man in black shirt, man in black shirt');
+    // Only the four most recent actions are kept.
+    expect(sentBody).not.toContain('- a1');
+    expect(sentBody).toContain('- a5');
+  });
+
   it('rejects a contact sheet tile outside the window', async () => {
     configureVision();
     const sheet = { columns: 2, rows: 1, tileTimestamps: [1_000, 9_000] };

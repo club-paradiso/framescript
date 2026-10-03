@@ -171,6 +171,7 @@ Rules:
 - Use the fewest action entries needed to describe the progression faithfully. Multiple actions are appropriate only when the observable state genuinely changes (for example reaches → hesitates → opens, falls → gets up, or turns → walks away).
 - Report only what is visible. Never infer motives, backstory, relationships, or off-screen facts.
 - Never state a real person's or actor's name. Refer to people by neutral descriptive labels ("the man in the blue coat") or by a label supplied in knownCharacters.
+- When KNOWN CHARACTER LABELS are given, reuse the matching label exactly for the same person so the same person keeps one name across windows. Introduce a new neutral label only for someone who matches none of them.
 - If the frames are black, corrupted, or unreadable, return empty arrays and say so in uncertainties.
 - Use offsetMs to place each action within the window so ordering is preserved.
 - Group micro-movements into one screenplay-relevant action. Do not emit one entry per limb movement.
@@ -201,6 +202,13 @@ export function buildVisionUserPrompt(request: VisionWindowRequest): string {
         .map((c) => c.displayName ?? c.id)
         .join(', ')}`,
     );
+  }
+
+  if (request.recentActions && request.recentActions.length > 0) {
+    lines.push(
+      'OBSERVED JUST BEFORE THIS WINDOW (continuity context only — do not repeat it, and describe only what these frames show):',
+    );
+    for (const action of request.recentActions) lines.push(`  - ${action}`);
   }
 
   if (request.dialogue.length > 0) {

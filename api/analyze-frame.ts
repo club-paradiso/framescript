@@ -66,6 +66,8 @@ interface RequestPayload {
   dialogue?: unknown;
   soundEvents?: unknown;
   currentSetting?: unknown;
+  knownCharacters?: unknown;
+  recentActions?: unknown;
   requestOcr?: unknown;
   metrics?: unknown;
 }
@@ -118,7 +120,8 @@ export async function POST(request: Request): Promise<Response> {
     frames: framesResult.frames,
     dialogue: parseDialogue(payload.dialogue, start, end),
     soundEvents: parseSounds(payload.soundEvents, start, end),
-    knownCharacters: [],
+    knownCharacters: parseCharacters(payload.knownCharacters),
+    ...(parseRecentActions(payload.recentActions) ?? {}),
     ...(typeof payload.currentSetting === 'string' && payload.currentSetting
       ? { currentSetting: payload.currentSetting.slice(0, MAX_TEXT) }
       : {}),
@@ -293,6 +296,32 @@ function parseSheet(
     tileTimestamps.push(t);
   }
   return { columns, rows, tileTimestamps };
+}
+
+/** Labels the client carried over from earlier windows. Text only, bounded. */
+function parseCharacters(value: unknown): VisionWindowRequest['knownCharacters'] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const result: VisionWindowRequest['knownCharacters'] = [];
+  for (const entry of value.slice(0, 12)) {
+    const raw = entry as { id?: unknown; displayName?: unknown };
+    const label = typeof raw.displayName === 'string' ? raw.displayName : raw.id;
+    if (typeof label !== 'string') continue;
+    const clean = label.trim().slice(0, 64);
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    result.push({ id: clean, displayName: clean });
+  }
+  return result;
+}
+
+function parseRecentActions(value: unknown): { recentActions: string[] } | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const recentActions = value
+    .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+    .slice(-4)
+    .map((entry) => entry.trim().slice(0, 200));
+  return recentActions.length > 0 ? { recentActions } : undefined;
 }
 
 function parseDialogue(value: unknown, start: number, end: number) {

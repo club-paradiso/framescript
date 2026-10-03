@@ -217,6 +217,8 @@ export {
   dialogueInWindow,
   soundsInWindow,
 } from '../ai/windowContext';
+export { ContinuityTracker } from '../ai/continuity';
+export type { ContinuityContext, ContinuityOptions } from '../ai/continuity';
 export {
   MAX_RETRY_AFTER_SECONDS,
   classifyHttpFailure,

@@ -25,6 +25,7 @@
  */
 
 import {
+  ContinuityTracker,
   FrameScriptError,
   describeError,
   describeFailureReason,
@@ -54,6 +55,14 @@ import {
   scanVideoDuringPlayback,
   type KeyframeWindow,
 } from './localMediaAnalyzer';
+import { captureSheetsBySeeking } from './contactSheet';
+import {
+  planDenseSheets,
+  planOverview,
+  promoteWindows,
+  salientMoments,
+  type OverviewResult,
+} from './twoPass';
 import { analyzeFrames, runBounded, transcribeWindow, type Capabilities } from './apiClient';
 import {
   SHORT_MEDIA_MS,
@@ -124,6 +133,10 @@ export interface AnalysisStats {
   keyframesCaptured: number;
   keyframeBytes: number;
   sceneObservations: number;
+  /** Coarse whole-file sheets described to locate and connect scenes. */
+  overviewWindows?: number;
+  /** Dense sheets added for moments the overview flagged and no scan window covered. */
+  overviewPromotedWindows?: number;
 }
 
 export interface AnalysisCoverage {
@@ -170,6 +183,9 @@ export interface RunAnalysisOptions {
   onProgress: (progress: AnalysisProgress) => void;
   signal: AbortSignal;
 }
+
+/** Fallback radius when an overview has a single tile. */
+const OVERVIEW_PROMOTION_RADIUS_MS = 2_000;
 
 /** Vision stays conservative because each request carries image payloads. */
 const VISION_CONCURRENCY = 2;
@@ -462,8 +478,110 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
     note('VISION_NOT_CONFIGURED', options.capabilities.vision.reason);
   }
 
+  // --- Overview: locate and connect -----------------------------------------
+  // A coarse pass over the whole file says where something happens and which
+  // labels and setting are in play. It never writes evidence itself; it only
+  // reorders the dense selection and gives each dense window its context.
+  const continuity = new ContinuityTracker();
+  let sceneStageStopped = false;
+  const wantsOverview =
+    options.sceneUnderstanding &&
+    options.capabilities.vision.configured &&
+    options.analyzeVideo &&
+    options.video !== null &&
+    durationMs > 0 &&
+    stats.observations > 0 &&
+    !aborted();
+  if (wantsOverview && options.video) {
+    const plans = planOverview(durationMs);
+    report('scenes', 0, `overview 0 of ${plans.length}`);
+    const sheets = await captureSheetsBySeeking(options.video, plans, options.signal);
+    const results: OverviewResult[] = [];
+    let consecutiveFailures = 0;
+
+    for (const [index, plan] of plans.entries()) {
+      const sheet = sheets[index];
+      if (!sheet || aborted() || sceneStageStopped) continue;
+      visionRequests.attempted++;
+      try {
+        const analysis = await analyzeFrames({
+          start: plan.start,
+          end: plan.end,
+          frames: [sheet],
+          dialogue: dialogueInWindow(events, plan.start, plan.end),
+          soundEvents: soundsInWindow(events, plan.start, plan.end),
+          ...continuity.contextAt(plan.start),
+          signal: options.signal,
+        });
+        visionRequests.succeeded++;
+        consecutiveFailures = 0;
+        if (analysis) {
+          continuity.observe(plan, analysis);
+          results.push({ start: plan.start, end: plan.end, analysis });
+        }
+      } catch (error) {
+        if (isAbort(error)) break;
+        visionRequests.failed++;
+        consecutiveFailures++;
+        note(
+          FrameScriptError.is(error) ? error.code : 'VISION_PROVIDER_FAILED',
+          errorDetail(error),
+          error,
+        );
+        // The dense stage would hit the same wall; stop scene understanding.
+        if (
+          (FrameScriptError.is(error) && !error.recoverable) ||
+          consecutiveFailures >= FAILURE_THRESHOLD
+        ) {
+          sceneStageStopped = true;
+        }
+      } finally {
+        sheet.base64 = '';
+        report('scenes', undefined, `overview ${index + 1} of ${plans.length}`);
+      }
+    }
+    stats.overviewWindows = results.length;
+
+    if (results.length > 0 && !sceneStageStopped && !aborted()) {
+      const moments = salientMoments(results);
+      const interval = plans[0] && plans[0].tileTimestamps.length > 1
+        ? plans[0].tileTimestamps[1]! - plans[0].tileTimestamps[0]!
+        : OVERVIEW_PROMOTION_RADIUS_MS;
+      promoteWindows(keyframeWindows, moments, interval / 2);
+
+      // Flagged moments the scan never opened a window on get a dense sheet
+      // of their own, fetched by seeking. Bounded by a share of the budget.
+      const dense = planDenseSheets(
+        moments,
+        keyframeWindows,
+        durationMs,
+        DEFAULT_CONTACT_SHEET,
+        DEFAULT_CONTACT_SHEET.tileIntervalMs,
+        Math.max(1, Math.floor(sceneRequestLimit / 3)),
+      );
+      if (dense.length > 0) {
+        const captured = await captureSheetsBySeeking(options.video, dense, options.signal);
+        let added = 0;
+        for (const [index, plan] of dense.entries()) {
+          const frame = captured[index];
+          if (!frame) continue;
+          const lastTile = frame.sheet?.tileTimestamps.at(-1) ?? plan.end;
+          keyframeWindows.push({
+            start: plan.start,
+            end: Math.max(lastTile, plan.start + 1),
+            frames: [frame],
+            importance: plan.importance,
+          });
+          added++;
+        }
+        stats.overviewPromotedWindows = added;
+        keyframeWindows.sort((a, b) => a.start - b.start);
+      }
+    }
+  }
+
   // --- Scene understanding -----------------------------------------------------
-  if (keyframeWindows.length > 0 && !aborted()) {
+  if (keyframeWindows.length > 0 && !aborted() && !sceneStageStopped) {
     const selected = selectSceneWindowsForAnalysis(keyframeWindows, sceneRequestLimit);
     stats.keyframeWindows = selected.length;
 
@@ -485,6 +603,7 @@ export async function runAnalysis(options: RunAnalysisOptions): Promise<Analysis
             frames: window.frames,
             dialogue: dialogueInWindow(events, window.start, window.end),
             soundEvents: soundsInWindow(events, window.start, window.end),
+            ...continuity.contextAt(window.start),
             signal: options.signal,
           });
           consecutiveFailures = 0;

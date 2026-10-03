@@ -353,6 +353,10 @@ export interface AnalyzeFramesRequest {
   }[];
   dialogue: { start: number; speakerId?: string; text: string }[];
   soundEvents: { start: number; kind: string }[];
+  /** Continuity context from earlier in the file. */
+  currentSetting?: string;
+  knownCharacters?: { id: string; displayName?: string }[];
+  recentActions?: string[];
   requestOcr?: boolean;
   signal?: AbortSignal;
 }
@@ -395,6 +399,11 @@ export async function analyzeFrames(
             })),
             dialogue: request.dialogue,
             soundEvents: request.soundEvents,
+            ...(request.currentSetting ? { currentSetting: request.currentSetting } : {}),
+            ...(request.knownCharacters?.length
+              ? { knownCharacters: request.knownCharacters }
+              : {}),
+            ...(request.recentActions?.length ? { recentActions: request.recentActions } : {}),
             ...(request.requestOcr ? { requestOcr: true } : {}),
           }),
           ...(request.signal ? { signal: request.signal } : {}),

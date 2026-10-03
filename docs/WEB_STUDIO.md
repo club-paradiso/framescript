@@ -76,6 +76,20 @@ rather than only around cuts, because the moments that matter most — an
 injury, a held expression — often move least. Its budget then grows to cover
 half the file (key scenes) or all of it (extended), never past 48 requests.
 Longer files keep the 6 or 12 cap.
+
+Scene understanding runs in two passes. First, an overview: the whole file as
+at most 8 coarse sheets (6x5 tiles of 192 px, one tile every 2 s for files up
+to 8 minutes, sparser for longer ones), described in order. The overview is
+never written into the screenplay. It marks where something happens, which
+promotes nearby windows in the dense selection. Flagged moments that no scan
+window covers get a dense sheet of their own, captured by seeking and limited
+to a third of the dense budget. Second, the dense pass runs as before, with
+each window also given continuity context: the setting and character labels
+already in use, and up to 3 actions observed in the 12 s before it. The model
+is told to reuse those labels and to describe only what its own frames show.
+
+The Chrome extension cannot look ahead in a live stream, so it skips the
+overview. It still carries continuity forward from one live window to the next.
 Concurrency is capped at 2 for each. Repeated provider failures stop the stage
 rather than retrying into a wall, and only 429 and 5xx are retried at all.
 
