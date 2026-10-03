@@ -192,7 +192,10 @@ export function useAnalysisControls(tabId: number | undefined) {
         type: 'ui/start-analysis',
         payload: { tabId },
       })) as { ok?: boolean; message?: string } | null;
-      if (!result?.ok && result?.message) setError(result.message);
+      // A degraded start is ok but carries a message (for example, capture was
+      // declined and only subtitles are running). Hiding it made a half-working
+      // session look fully working.
+      if (result?.message) setError(result.message);
     } catch {
       setError(
         'FrameScript could not start analysis. Reopen the popup or side panel while the video tab is active and try again.',

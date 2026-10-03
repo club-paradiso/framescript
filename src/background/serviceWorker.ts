@@ -144,7 +144,22 @@ async function startAnalysis(tabId: number): Promise<{ ok: boolean; message?: st
   // Subtitles come from the content script and need no capture permission, so
   // they start first and keep working even if capture is declined.
   if (settings.analysis.sources.subtitles) {
-    await sendToTab(tabId, { type: 'worker/start-subtitles', payload: {} });
+    const subtitles = await sendToTab<{ ok?: boolean }>(tabId, {
+      type: 'worker/start-subtitles',
+      payload: {},
+    });
+    // Report the subtitle source honestly: it stayed "unavailable" even while
+    // cues were being captured, and nothing said why when they were not.
+    session.setSourceStatuses([
+      subtitles?.ok
+        ? { id: 'subtitle', state: 'active', eventCount: 0 }
+        : {
+            id: 'subtitle',
+            state: 'unavailable',
+            eventCount: 0,
+            message: userMessageFor('CAPTION_CONTAINER_NOT_FOUND'),
+          },
+    ]);
   }
 
   try {
@@ -185,6 +200,7 @@ async function startAnalysis(tabId: number): Promise<{ ok: boolean; message?: st
       streamId,
       tabId,
       fidelity: settings.analysis.fidelity,
+      settings,
       sources: {
         audio: settings.analysis.sources.audio,
         video: settings.analysis.sources.video,
@@ -585,9 +601,15 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
 });
 
-/** Push settings changes to content scripts so quality re-applies immediately. */
+/**
+ * Push settings changes to content scripts so quality re-applies immediately,
+ * and to the offscreen document, which cannot read storage on its own.
+ */
 settingsStore.subscribe((settings: FrameScriptSettings) => {
   void (async () => {
+    if (sessions.activeCount > 0) {
+      await sendRuntime({ type: 'offscreen/settings', payload: { settings } });
+    }
     const tabs = await chrome.tabs.query({
       url: ['https://www.youtube.com/*', 'https://www.netflix.com/*'],
     });

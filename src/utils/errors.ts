@@ -121,7 +121,7 @@ const USER_MESSAGES: Record<FrameScriptErrorCode, string> = {
   CAPTION_CONTAINER_NOT_FOUND:
     'No subtitle track is currently displayed, so subtitle evidence is unavailable. Turn subtitles on in the player to include them.',
   TAB_CAPTURE_FAILED:
-    'Chrome declined to share this tab’s media with FrameScript. Analysis needs to be started from the FrameScript popup or side panel.',
+    'Chrome only shares a tab’s audio and picture after you click the FrameScript toolbar icon on that tab. Click the icon on the video tab and press Start in the popup. Until then only subtitles are captured.',
   AUDIO_SOURCE_UNAVAILABLE:
     'Audio analysis is unavailable for this tab. The screenplay will continue from the remaining sources.',
   VIDEO_SOURCE_UNAVAILABLE:

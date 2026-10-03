@@ -63,6 +63,29 @@ test('tab capture is requested by the service worker, not a transient UI page', 
   expect(sidePanel).not.toContain('getMediaStreamId');
 });
 
+test('the offscreen document never depends on chrome.storage', () => {
+  // An offscreen document exposes only chrome.runtime. Reading settings from
+  // storage there silently fell back to defaults and switched every configured
+  // AI provider off; settings must arrive in the start message instead.
+  const html = readFileSync(join(EXTENSION_PATH, 'offscreen/offscreen.html'), 'utf8');
+  const entry = /src="\/?([^"]+\.js)"/.exec(html)?.[1];
+  expect(entry).toBeTruthy();
+
+  const seen = new Set<string>();
+  const queue = [entry!];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const code = readFileSync(join(EXTENSION_PATH, file), 'utf8');
+    expect(code, `${file} reaches chrome.storage`).not.toMatch(/chrome\.storage/);
+    for (const match of code.matchAll(/from\s*"\.\/([^"]+\.js)"/g)) {
+      queue.push(join(file.slice(0, file.lastIndexOf('/') + 1), match[1]!));
+    }
+  }
+  expect(seen.size).toBeGreaterThan(1);
+});
+
 test('the popup renders and offers to open the screenplay', async () => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/popup/index.html`);
