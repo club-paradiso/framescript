@@ -152,13 +152,24 @@ export type WorkerToUi =
 export type WorkerToOffscreen =
   | Envelope<
       'offscreen/start',
-      { streamId: string; tabId: number; fidelity: AnalysisFidelity; sources: Record<string, boolean> }
+      {
+        streamId: string;
+        tabId: number;
+        fidelity: AnalysisFidelity;
+        sources: Record<string, boolean>;
+        /**
+         * The settings to analyze with. An offscreen document can use only
+         * `chrome.runtime`, not `chrome.storage`, so it cannot read them itself.
+         */
+        settings: FrameScriptSettings;
+      }
     >
   | Envelope<'offscreen/stop'>
   | Envelope<'offscreen/pause'>
   | Envelope<'offscreen/resume'>
   | Envelope<'offscreen/media-time', { currentTimeMs: MediaTimeMs; playing: boolean }>
   | Envelope<'offscreen/configure', { fidelity: AnalysisFidelity; sources: Record<string, boolean> }>
+  | Envelope<'offscreen/settings', { settings: FrameScriptSettings }>
   /** Dialogue evidence the offscreen document cannot observe itself (subtitles). */
   | Envelope<'offscreen/context-evidence', { events: EvidenceEvent[] }>;
 

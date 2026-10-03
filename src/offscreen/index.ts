@@ -18,7 +18,6 @@ import type { WorkerToOffscreen } from '../messaging/protocol';
 import { MediaClock } from './mediaClock';
 import { AudioPipeline } from './audioPipeline';
 import { VideoPipeline } from './videoPipeline';
-import { settingsStore } from '../settings/store';
 import type { FrameScriptSettings } from '../settings/types';
 import { InferenceCoordinator } from '../ai/coordinator';
 import { visionAnalysisToEvidence } from '../ai/evidenceMapping';
@@ -105,6 +104,11 @@ class OffscreenController {
           playing: message.payload.playing,
         });
         return { ok: true };
+      case 'offscreen/settings':
+        // Applies to OCR availability now and to providers on the next start;
+        // rebuilding a provider mid-run would drop its queued windows.
+        this.#settings = message.payload.settings;
+        return { ok: true };
       case 'offscreen/configure':
         this.#fidelity = message.payload.fidelity;
         return { ok: true };
@@ -121,10 +125,14 @@ class OffscreenController {
     tabId: number;
     fidelity: AnalysisFidelity;
     sources: Record<string, boolean>;
+    settings: FrameScriptSettings;
   }): Promise<{ ok: boolean; message?: string }> {
     await this.#stop();
     this.#fidelity = payload.fidelity;
-    this.#settings = await settingsStore.get();
+    // Settings arrive with the start message: an offscreen document has no
+    // `chrome.storage`, and reading it here silently fell back to defaults,
+    // which switched every AI provider the user had configured off.
+    this.#settings = payload.settings;
 
     const wantAudio = payload.sources.audio !== false;
     const wantVideo = payload.sources.video !== false;
