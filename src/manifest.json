@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FrameScript",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Watch at the best quality. Understand it like a screenplay.",
   "minimum_chrome_version": "116",
   "icons": {
