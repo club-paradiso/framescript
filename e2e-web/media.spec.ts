@@ -355,8 +355,9 @@ test('describes selected scenes without sending the video, and bounds the reques
   await expect(summary().getByText('Analysis complete')).toBeVisible({ timeout: ANALYSIS_TIMEOUT });
 
   // A description the local scanner could not have produced, in the script.
+  // Up to 6 dense windows at this depth, plus the bounded whole-file overview.
   expect(vision.calls).toBeGreaterThan(0);
-  expect(vision.calls).toBeLessThanOrEqual(6);
+  expect(vision.calls).toBeLessThanOrEqual(6 + 8);
   await expect(summary().getByText(/semantic scene observations/)).toBeVisible();
   await expect(
     page.locator('.line--action', { hasText: 'pale block slides across the frame' }).first(),
@@ -371,7 +372,10 @@ test('describes selected scenes without sending the video, and bounds the reques
   // The sheet holds several consecutive moments, so the model sees motion
   // between them rather than a lone still per request.
   expect(Math.max(...vision.momentCounts)).toBeGreaterThan(1);
-  for (const moments of vision.momentCounts) expect(moments).toBeLessThanOrEqual(16);
+  // Dense sheets hold at most 16 moments, overview sheets at most 30.
+  for (const moments of vision.momentCounts) expect(moments).toBeLessThanOrEqual(30);
+  // A later window was told what an earlier one observed.
+  expect(vision.continuityCalls).toBeGreaterThan(0);
   expect(externalRequests).toEqual([]);
 });
 

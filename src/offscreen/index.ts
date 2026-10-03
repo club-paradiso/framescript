@@ -28,6 +28,7 @@ import { OpenAiCompatibleAsrProvider } from '../ai/providers/openaiCompatible';
 import type { SpeechRecognitionProvider, VisionAnalysisProvider, VisionFrame } from '../ai/types';
 import type { DeepAnalysisRequest } from '../temporal/TemporalScanner';
 import { RecentWindowContext } from '../ai/windowContext';
+import { ContinuityTracker } from '../ai/continuity';
 
 const nextId = createIdFactory('deep');
 
@@ -80,6 +81,8 @@ class OffscreenController {
    * it; subtitle cues arrive from the service worker.
    */
   #context = new RecentWindowContext();
+  /** What earlier windows reported, so the next one keeps labels and setting. */
+  #continuity = new ContinuityTracker();
 
   async handle(message: WorkerToOffscreen): Promise<unknown> {
     switch (message.type) {
@@ -250,6 +253,7 @@ class OffscreenController {
     this.#stream = null;
     this.#clock.reset();
     this.#context.clear();
+    this.#continuity.clear();
   }
 
   /**
@@ -321,12 +325,13 @@ class OffscreenController {
         frames,
         metrics: request.metrics,
         ...this.#context.forWindow(start, end),
-        knownCharacters: [],
+        ...this.#continuity.contextAt(start),
         ...(request.textLikely && this.#ocrAvailable() ? { requestOcr: true } : {}),
       },
       request.importance,
     );
     if (!analysis) return;
+    this.#continuity.observe({ start, end }, analysis);
 
     // Mapping lives in `src/ai/evidenceMapping.ts` so the extension and Web
     // Studio turn provider output into evidence the same way.

@@ -47,6 +47,7 @@ import {
   type SpeechRegion,
   type VisualEvidence,
 } from '@/core';
+import { ContactSheetBuilder } from './contactSheet';
 
 const nextId = createIdFactory('local');
 
@@ -350,10 +351,6 @@ const CONTINUOUS_BASE_IMPORTANCE = 0.15;
 
 const CAPTURE_MIME = 'image/jpeg';
 const CAPTURE_QUALITY = 0.72;
-/** Re-encode a sheet at this quality if the first pass is too large to send. */
-const SHEET_FALLBACK_QUALITY = 0.55;
-/** Stay under the endpoint's per-frame limit with room for base64 framing. */
-const SHEET_MAX_BYTES = 480 * 1024;
 
 /**
  * Scans the picture during playback.
@@ -398,52 +395,21 @@ export function scanVideoDuringPlayback(
     /** The window currently accepting frames, if any. */
     let open: (KeyframeWindow & { lastCaptureAt: number }) | null = null;
 
-    // Contact-sheet state. Tiles are drawn straight into one canvas, so a
-    // window costs a single JPEG encode however many moments it holds.
-    const sheetCanvas = sheetOptions ? document.createElement('canvas') : null;
-    const sheetContext = sheetCanvas?.getContext('2d') ?? null;
-    let sheetTiles: MediaTimeMs[] = [];
-    let tileWidth = 0;
-    let tileHeight = 0;
-
-    const encodeSheet = (window: KeyframeWindow): CapturedFrame | null => {
-      if (!sheetOptions || !sheetCanvas || !sheetContext || sheetTiles.length === 0) return null;
-      const rows = Math.ceil(sheetTiles.length / sheetOptions.columns);
-      // Trim unused rows so a short final window does not send blank tiles.
-      const output = document.createElement('canvas');
-      output.width = sheetCanvas.width;
-      output.height = rows * tileHeight;
-      const outputContext = output.getContext('2d');
-      if (!outputContext) return null;
-      outputContext.drawImage(sheetCanvas, 0, 0);
-
-      let url = output.toDataURL(CAPTURE_MIME, CAPTURE_QUALITY);
-      if ((url.length * 3) / 4 > SHEET_MAX_BYTES) {
-        url = output.toDataURL(CAPTURE_MIME, SHEET_FALLBACK_QUALITY);
-      }
-      const base64 = url.slice(url.indexOf(',') + 1);
-      if (!base64 || (base64.length * 3) / 4 > SHEET_MAX_BYTES) return null;
-      keyframeBytes += Math.round((base64.length * 3) / 4);
-      return {
-        timestamp: window.start,
-        base64,
-        mimeType: CAPTURE_MIME,
-        width: output.width,
-        height: output.height,
-        sheet: { columns: sheetOptions.columns, rows, tileTimestamps: [...sheetTiles] },
-      };
-    };
+    // Contact-sheet state: one builder per open window.
+    let sheet: ContactSheetBuilder | null = null;
 
     const closeWindow = () => {
       if (!open) return;
       const { lastCaptureAt: _drop, ...rest } = open;
-      if (sheetOptions) {
-        const lastTile = sheetTiles[sheetTiles.length - 1];
-        const sheet = encodeSheet(rest);
-        sheetTiles = [];
-        if (sheet && lastTile !== undefined) {
+      if (sheet) {
+        const lastTile = sheet.lastTile;
+        const encoded = sheet.encode();
+        sheet.dispose();
+        sheet = null;
+        if (encoded && lastTile !== undefined) {
           rest.end = Math.max(lastTile, rest.start + 1);
-          rest.frames = [sheet];
+          rest.frames = [encoded];
+          keyframeBytes += Math.round((encoded.base64.length * 3) / 4);
         }
       }
       if (rest.frames.length > 0) keyframeWindows.push(rest);
@@ -560,50 +526,22 @@ export function scanVideoDuringPlayback(
       });
     };
 
-    /** Draws the current video frame into the next free tile, stamped with its offset. */
+    /** Draws the current video frame into the open window's next tile. */
     const captureTile = (mediaTime: MediaTimeMs): void => {
-      if (!sheetOptions || !sheetCanvas || !sheetContext || !open) return;
-      const capacity = sheetOptions.columns * sheetOptions.rows;
-      if (sheetTiles.length >= capacity) return;
+      if (!sheetOptions || !open) return;
       if (mediaTime - open.lastCaptureAt < sheetOptions.tileIntervalMs * 0.9) return;
-
-      if (sheetTiles.length === 0) {
-        const sourceWidth = video.videoWidth || sheetOptions.tileWidth;
-        const sourceHeight = video.videoHeight || Math.round((sheetOptions.tileWidth * 9) / 16);
-        tileWidth = Math.min(sheetOptions.tileWidth, sourceWidth);
-        tileHeight = Math.max(1, Math.round((tileWidth / sourceWidth) * sourceHeight));
-        sheetCanvas.width = tileWidth * sheetOptions.columns;
-        sheetCanvas.height = tileHeight * sheetOptions.rows;
-        sheetContext.fillStyle = '#000';
-        sheetContext.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
-      }
-
-      const index = sheetTiles.length;
-      const x = (index % sheetOptions.columns) * tileWidth;
-      const y = Math.floor(index / sheetOptions.columns) * tileHeight;
-      try {
-        sheetContext.drawImage(video, x, y, tileWidth, tileHeight);
-      } catch {
+      sheet ??= new ContactSheetBuilder(sheetOptions, open.start);
+      if (sheet.full) return;
+      if (!sheet.addTile(video, mediaTime)) {
+        // Readback refused: the semantic path is off for this window.
+        sheet.dispose();
+        sheet = null;
         open = null;
-        sheetTiles = [];
         return;
       }
-      const label = `+${Math.round(mediaTime - open.start)}ms`;
-      sheetContext.font = 'bold 13px monospace';
-      const labelWidth = sheetContext.measureText(label).width + 8;
-      sheetContext.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      sheetContext.fillRect(x, y, labelWidth, 18);
-      sheetContext.fillStyle = '#ffeb3b';
-      sheetContext.fillText(label, x + 4, y + 13);
-      // Separator lines keep adjacent tiles from reading as one picture.
-      sheetContext.strokeStyle = '#000';
-      sheetContext.lineWidth = 2;
-      sheetContext.strokeRect(x, y, tileWidth, tileHeight);
-
-      sheetTiles.push(mediaTime);
       open.lastCaptureAt = mediaTime;
       keyframesCaptured++;
-      if (sheetTiles.length >= capacity) closeWindow();
+      if (sheet.full) closeWindow();
     };
 
     /** Encodes the current video frame at capture resolution. Synchronous. */
@@ -721,6 +659,7 @@ export function scanVideoDuringPlayback(
       // two canvases' worth of pixels for the rest of the session.
       canvas.width = 0;
       canvas.height = 0;
+      sheet?.dispose();
       captureCanvas.width = 0;
       captureCanvas.height = 0;
     }

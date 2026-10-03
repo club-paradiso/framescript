@@ -135,6 +135,12 @@ export interface VisionWindowRequest {
   knownCharacters: { id: string; displayName?: string }[];
   /** Setting established by the current scene, if any. */
   currentSetting?: string;
+  /**
+   * What was observed shortly before this window, oldest first. Continuity
+   * context only: it lets a model connect a wound to the blow before it, but
+   * the answer must still describe only what these frames show.
+   */
+  recentActions?: string[];
   /** Ask the provider to read on-screen text in this window. */
   requestOcr?: boolean;
   signal?: AbortSignal;

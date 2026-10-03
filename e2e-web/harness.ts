@@ -148,6 +148,8 @@ export interface VisionStub {
   readonly frameCounts: number[];
   /** Moments per request as the prompt states them: contact-sheet tiles count individually. */
   readonly momentCounts: number[];
+  /** Requests whose prompt carried continuity context from an earlier window. */
+  readonly continuityCalls: number;
   mode: ProviderMode;
   retryAfterSeconds?: number;
   reset: () => void;
@@ -158,6 +160,7 @@ export async function startVisionStub(): Promise<VisionStub> {
   let calls = 0;
   const frameCounts: number[] = [];
   const momentCounts: number[] = [];
+  let continuityCalls = 0;
   const state = { mode: 'ok' as ProviderMode, retryAfterSeconds: 2 as number | undefined };
 
   const server = createServer((request, response) => {
@@ -196,6 +199,9 @@ export async function startVisionStub(): Promise<VisionStub> {
           .map((part) => /FRAME COUNT: (\d+)/.exec(part.text ?? '')?.[1])
           .find((value) => value !== undefined);
         momentCounts.push(stated ? Number(stated) : 0);
+        if (content.some((part) => (part.text ?? '').includes('OBSERVED JUST BEFORE'))) {
+          continuityCalls++;
+        }
       } catch {
         frameCounts.push(0);
         momentCounts.push(0);
@@ -237,6 +243,9 @@ export async function startVisionStub(): Promise<VisionStub> {
     get momentCounts() {
       return momentCounts;
     },
+    get continuityCalls() {
+      return continuityCalls;
+    },
     get frameCounts() {
       return frameCounts;
     },
@@ -256,6 +265,7 @@ export async function startVisionStub(): Promise<VisionStub> {
       calls = 0;
       frameCounts.length = 0;
       momentCounts.length = 0;
+      continuityCalls = 0;
       state.mode = 'ok';
       state.retryAfterSeconds = 2;
     },
