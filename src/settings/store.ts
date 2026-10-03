@@ -20,6 +20,10 @@ export class SettingsStore {
 
   async get(): Promise<FrameScriptSettings> {
     if (this.#cache) return this.#cache;
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) {
+      this.#cache = mergeSettings(undefined);
+      return this.#cache;
+    }
     try {
       const raw = await chrome.storage.local.get(STORAGE_KEY);
       this.#cache = mergeSettings(raw[STORAGE_KEY] as Partial<FrameScriptSettings> | undefined);
