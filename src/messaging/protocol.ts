@@ -158,7 +158,9 @@ export type WorkerToOffscreen =
   | Envelope<'offscreen/pause'>
   | Envelope<'offscreen/resume'>
   | Envelope<'offscreen/media-time', { currentTimeMs: MediaTimeMs; playing: boolean }>
-  | Envelope<'offscreen/configure', { fidelity: AnalysisFidelity; sources: Record<string, boolean> }>;
+  | Envelope<'offscreen/configure', { fidelity: AnalysisFidelity; sources: Record<string, boolean> }>
+  /** Dialogue evidence the offscreen document cannot observe itself (subtitles). */
+  | Envelope<'offscreen/context-evidence', { events: EvidenceEvent[] }>;
 
 export type OffscreenToWorker =
   | Envelope<'offscreen/ready'>

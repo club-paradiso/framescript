@@ -266,9 +266,17 @@ async function handleContentMessage(
       if (session.phase === 'running') await pushMediaTime(session);
       return { ok: true };
 
-    case 'content/evidence':
+    case 'content/evidence': {
       session.ingest(message.payload.events);
+      // The offscreen document describes picture windows live but never sees
+      // the player's subtitle track. Hand it the cues so a window is analyzed
+      // with the words spoken over it, not as a silent set of stills.
+      const subtitles = message.payload.events.filter((event) => event.source === 'subtitle');
+      if (subtitles.length > 0 && session.phase === 'running') {
+        void sendRuntime({ type: 'offscreen/context-evidence', payload: { events: subtitles } });
+      }
       return { ok: true };
+    }
 
     case 'content/quality':
       session.setQuality(message.payload);

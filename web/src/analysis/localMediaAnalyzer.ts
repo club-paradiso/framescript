@@ -274,6 +274,8 @@ export interface CapturedFrame {
   mimeType: string;
   width: number;
   height: number;
+  /** Set when the image is a contact sheet of several consecutive moments. */
+  sheet?: { columns: number; rows: number; tileTimestamps: MediaTimeMs[] };
 }
 
 export interface KeyframeWindow {
@@ -310,12 +312,48 @@ export interface VideoScanOptions {
   /** Longest span of a keyframe window, in media time. */
   windowMs?: number;
   captureWidth?: number;
+  /**
+   * Capture each window as one contact sheet of consecutive tiles instead of a
+   * few separate frames. The window then spans `columns * rows * tileIntervalMs`.
+   */
+  contactSheet?: ContactSheetOptions;
   onProgress?: (ratio: number) => void;
   signal?: AbortSignal;
 }
 
+export interface ContactSheetOptions {
+  columns: number;
+  rows: number;
+  /** Media time between tiles. */
+  tileIntervalMs: number;
+  /** Width of one tile; height follows the source aspect ratio. */
+  tileWidth: number;
+  /**
+   * Keep a window open back to back across the whole file, not only after a
+   * cut or an action. Short media is cheap to cover end to end, and the
+   * moments that matter most — a close-up of an injury, a held expression —
+   * are often the ones with the least motion.
+   */
+  continuous: boolean;
+}
+
+/** A 4x4 grid at 250 ms covers four seconds at four moments a second. */
+export const DEFAULT_CONTACT_SHEET: Omit<ContactSheetOptions, 'continuous'> = {
+  columns: 4,
+  rows: 4,
+  tileIntervalMs: 250,
+  tileWidth: 320,
+};
+
+/** A continuous window with nothing happening in it still has some value. */
+const CONTINUOUS_BASE_IMPORTANCE = 0.15;
+
 const CAPTURE_MIME = 'image/jpeg';
 const CAPTURE_QUALITY = 0.72;
+/** Re-encode a sheet at this quality if the first pass is too large to send. */
+const SHEET_FALLBACK_QUALITY = 0.55;
+/** Stay under the endpoint's per-frame limit with room for base64 framing. */
+const SHEET_MAX_BYTES = 480 * 1024;
 
 /**
  * Scans the picture during playback.
@@ -326,9 +364,12 @@ const CAPTURE_QUALITY = 0.72;
  *
  * Keyframes are captured only inside a window opened by a scene cut or the
  * start of a sustained action, at most `maxFramesPerWindow` per window and at
- * most `maxKeyframeWindows` windows for the whole file. There is no code path
- * that captures every frame, and none that retains a frame after its window has
- * been handed to the caller.
+ * most `maxKeyframeWindows` windows for the whole file. With `contactSheet`, a
+ * window is instead one image of up to `columns * rows` tiles taken
+ * `tileIntervalMs` apart, and a `continuous` sheet keeps windows back to back.
+ * Either way the window count stays capped, there is no code path that captures
+ * every frame, and none that retains a frame after its window has been handed
+ * to the caller.
  */
 export function scanVideoDuringPlayback(
   video: HTMLVideoElement,
@@ -339,8 +380,11 @@ export function scanVideoDuringPlayback(
     const events: EvidenceEvent[] = [];
     const segmenter = new ActionSegmenter();
     const keyframeWindows: KeyframeWindow[] = [];
+    const sheetOptions = options.contactSheet;
     const maxFramesPerWindow = options.maxFramesPerWindow ?? 3;
-    const windowMs = options.windowMs ?? 2_400;
+    const windowMs = sheetOptions
+      ? sheetOptions.columns * sheetOptions.rows * sheetOptions.tileIntervalMs
+      : (options.windowMs ?? 2_400);
     const captureWidth = options.captureWidth ?? 512;
 
     let sceneCuts = 0;
@@ -354,9 +398,54 @@ export function scanVideoDuringPlayback(
     /** The window currently accepting frames, if any. */
     let open: (KeyframeWindow & { lastCaptureAt: number }) | null = null;
 
+    // Contact-sheet state. Tiles are drawn straight into one canvas, so a
+    // window costs a single JPEG encode however many moments it holds.
+    const sheetCanvas = sheetOptions ? document.createElement('canvas') : null;
+    const sheetContext = sheetCanvas?.getContext('2d') ?? null;
+    let sheetTiles: MediaTimeMs[] = [];
+    let tileWidth = 0;
+    let tileHeight = 0;
+
+    const encodeSheet = (window: KeyframeWindow): CapturedFrame | null => {
+      if (!sheetOptions || !sheetCanvas || !sheetContext || sheetTiles.length === 0) return null;
+      const rows = Math.ceil(sheetTiles.length / sheetOptions.columns);
+      // Trim unused rows so a short final window does not send blank tiles.
+      const output = document.createElement('canvas');
+      output.width = sheetCanvas.width;
+      output.height = rows * tileHeight;
+      const outputContext = output.getContext('2d');
+      if (!outputContext) return null;
+      outputContext.drawImage(sheetCanvas, 0, 0);
+
+      let url = output.toDataURL(CAPTURE_MIME, CAPTURE_QUALITY);
+      if ((url.length * 3) / 4 > SHEET_MAX_BYTES) {
+        url = output.toDataURL(CAPTURE_MIME, SHEET_FALLBACK_QUALITY);
+      }
+      const base64 = url.slice(url.indexOf(',') + 1);
+      if (!base64 || (base64.length * 3) / 4 > SHEET_MAX_BYTES) return null;
+      keyframeBytes += Math.round((base64.length * 3) / 4);
+      return {
+        timestamp: window.start,
+        base64,
+        mimeType: CAPTURE_MIME,
+        width: output.width,
+        height: output.height,
+        sheet: { columns: sheetOptions.columns, rows, tileTimestamps: [...sheetTiles] },
+      };
+    };
+
     const closeWindow = () => {
       if (!open) return;
       const { lastCaptureAt: _drop, ...rest } = open;
+      if (sheetOptions) {
+        const lastTile = sheetTiles[sheetTiles.length - 1];
+        const sheet = encodeSheet(rest);
+        sheetTiles = [];
+        if (sheet && lastTile !== undefined) {
+          rest.end = Math.max(lastTile, rest.start + 1);
+          rest.frames = [sheet];
+        }
+      }
       if (rest.frames.length > 0) keyframeWindows.push(rest);
       open = null;
     };
@@ -411,6 +500,9 @@ export function scanVideoDuringPlayback(
             );
             openWindow(segment.start, segment.peakImportance);
           }
+          // A continuous sheet keeps its window whatever happens inside it; what
+          // happened only raises how strongly the window competes for budget.
+          if (open && sheetOptions) open.importance = Math.max(open.importance, event.importance);
         },
         onSceneCut: (timestamp, score) => {
           sceneCuts++;
@@ -425,6 +517,12 @@ export function scanVideoDuringPlayback(
           events.push(event);
           // A cut is the strongest signal that the *next* couple of seconds are
           // worth describing, so it takes priority over an already-open window.
+          // A continuous contact sheet already holds the cut and what follows it
+          // in order, so it is only marked as important instead of split.
+          if (open && sheetOptions?.continuous) {
+            open.importance = Math.max(open.importance, score, 0.6);
+            return;
+          }
           closeWindow();
           openWindow(timestamp, Math.max(score, 0.6));
         },
@@ -462,8 +560,58 @@ export function scanVideoDuringPlayback(
       });
     };
 
+    /** Draws the current video frame into the next free tile, stamped with its offset. */
+    const captureTile = (mediaTime: MediaTimeMs): void => {
+      if (!sheetOptions || !sheetCanvas || !sheetContext || !open) return;
+      const capacity = sheetOptions.columns * sheetOptions.rows;
+      if (sheetTiles.length >= capacity) return;
+      if (mediaTime - open.lastCaptureAt < sheetOptions.tileIntervalMs * 0.9) return;
+
+      if (sheetTiles.length === 0) {
+        const sourceWidth = video.videoWidth || sheetOptions.tileWidth;
+        const sourceHeight = video.videoHeight || Math.round((sheetOptions.tileWidth * 9) / 16);
+        tileWidth = Math.min(sheetOptions.tileWidth, sourceWidth);
+        tileHeight = Math.max(1, Math.round((tileWidth / sourceWidth) * sourceHeight));
+        sheetCanvas.width = tileWidth * sheetOptions.columns;
+        sheetCanvas.height = tileHeight * sheetOptions.rows;
+        sheetContext.fillStyle = '#000';
+        sheetContext.fillRect(0, 0, sheetCanvas.width, sheetCanvas.height);
+      }
+
+      const index = sheetTiles.length;
+      const x = (index % sheetOptions.columns) * tileWidth;
+      const y = Math.floor(index / sheetOptions.columns) * tileHeight;
+      try {
+        sheetContext.drawImage(video, x, y, tileWidth, tileHeight);
+      } catch {
+        open = null;
+        sheetTiles = [];
+        return;
+      }
+      const label = `+${Math.round(mediaTime - open.start)}ms`;
+      sheetContext.font = 'bold 13px monospace';
+      const labelWidth = sheetContext.measureText(label).width + 8;
+      sheetContext.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      sheetContext.fillRect(x, y, labelWidth, 18);
+      sheetContext.fillStyle = '#ffeb3b';
+      sheetContext.fillText(label, x + 4, y + 13);
+      // Separator lines keep adjacent tiles from reading as one picture.
+      sheetContext.strokeStyle = '#000';
+      sheetContext.lineWidth = 2;
+      sheetContext.strokeRect(x, y, tileWidth, tileHeight);
+
+      sheetTiles.push(mediaTime);
+      open.lastCaptureAt = mediaTime;
+      keyframesCaptured++;
+      if (sheetTiles.length >= capacity) closeWindow();
+    };
+
     /** Encodes the current video frame at capture resolution. Synchronous. */
     const captureFrame = (mediaTime: MediaTimeMs): void => {
+      if (sheetOptions) {
+        captureTile(mediaTime);
+        return;
+      }
       if (!captureContext || !open) return;
       if (open.frames.length >= maxFramesPerWindow) return;
       if (mediaTime - open.lastCaptureAt < 400) return;
@@ -521,6 +669,7 @@ export function scanVideoDuringPlayback(
         return;
       }
 
+      if (sheetOptions?.continuous && !open) openWindow(mediaTime, CONTINUOUS_BASE_IMPORTANCE);
       if (open) {
         if (mediaTime > open.end) closeWindow();
         else captureFrame(mediaTime);

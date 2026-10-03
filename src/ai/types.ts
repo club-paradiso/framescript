@@ -79,6 +79,41 @@ export interface VisionFrame {
   mimeType: string;
   width: number;
   height: number;
+  /** Present when this image is a contact sheet of several moments. */
+  sheet?: ContactSheetLayout;
+}
+
+/**
+ * A contact sheet packs consecutive moments into one image: a grid of tiles
+ * read left to right, top to bottom, each stamped with its offset. One request
+ * then carries many times more temporal coverage than separate frames would,
+ * at the same request count.
+ */
+export interface ContactSheetLayout {
+  columns: number;
+  rows: number;
+  /** Media time of each filled tile, in reading order. */
+  tileTimestamps: MediaTimeMs[];
+}
+
+/** Every moment a frame shows: its tiles for a contact sheet, else itself. */
+export function frameMoments(frame: Pick<VisionFrame, 'timestamp' | 'sheet'>): MediaTimeMs[] {
+  return frame.sheet && frame.sheet.tileTimestamps.length > 0
+    ? frame.sheet.tileTimestamps
+    : [frame.timestamp];
+}
+
+/** The text placed before a frame's image so ordering survives the wire. */
+export function describeFrameForPrompt(
+  frame: Pick<VisionFrame, 'timestamp' | 'sheet'>,
+  windowStart: MediaTimeMs,
+): string {
+  if (!frame.sheet) return `Frame at +${frame.timestamp - windowStart}ms:`;
+  const offsets = frame.sheet.tileTimestamps.map((t) => `+${t - windowStart}ms`);
+  return (
+    `Contact sheet: ${frame.sheet.columns}x${frame.sheet.rows} grid of ${offsets.length} consecutive moments, ` +
+    `read left to right, top to bottom; each tile is stamped with its offset. Tile offsets: ${offsets.join(', ')}:`
+  );
 }
 
 /**

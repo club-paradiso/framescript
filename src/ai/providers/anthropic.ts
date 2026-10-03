@@ -22,6 +22,7 @@ import type {
   VisionWindowAnalysis,
   VisionWindowRequest,
 } from '../types.js';
+import { describeFrameForPrompt } from '../types.js';
 import { extractJson } from '../validation.js';
 import {
   buildVisionUserPrompt,
@@ -135,7 +136,7 @@ export class AnthropicVisionProvider implements VisionAnalysisProvider {
     // Frames are interleaved with their offsets so ordering survives the wire.
     const content: Record<string, unknown>[] = [];
     for (const frame of frames) {
-      content.push({ type: 'text', text: `Frame at +${frame.timestamp - request.start}ms:` });
+      content.push({ type: 'text', text: describeFrameForPrompt(frame, request.start) });
       content.push({
         type: 'image',
         source: { type: 'base64', media_type: frame.mimeType, data: toBase64(frame.data) },

@@ -468,6 +468,69 @@ describe('POST /api/analyze-frame', () => {
     expect(((await response.json()) as { message: string }).message).toMatch(/outside the window/i);
   });
 
+  it('sends a contact sheet with every tile offset so the model reads it in order', async () => {
+    configureVision();
+    let sentBody = '';
+    globalThis.fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      sentBody = String(init?.body ?? '');
+      return new Response(
+        JSON.stringify({
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                actions: [],
+                characters: [],
+                settingChanges: [],
+                text: [],
+                uncertainties: [],
+              }),
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const sheet = { columns: 2, rows: 2, tileTimestamps: [1_000, 1_250, 1_500, 1_750] };
+    const response = await analyzeFrame(
+      frameRequest({ frames: [{ ...frame, timestamp: 1_000, sheet }] }),
+    );
+    expect(response.status).toBe(200);
+    expect(sentBody).toContain('Contact sheet: 2x2 grid of 4 consecutive moments');
+    expect(sentBody).toContain('+0ms, +250ms, +500ms, +750ms');
+    expect(sentBody).toContain('FRAME COUNT: 4 moments in 1 image(s), 1 of them contact sheets');
+  });
+
+  it('rejects a contact sheet tile outside the window', async () => {
+    configureVision();
+    const sheet = { columns: 2, rows: 1, tileTimestamps: [1_000, 9_000] };
+    const response = await analyzeFrame(
+      frameRequest({ frames: [{ ...frame, timestamp: 1_000, sheet }] }),
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { message: string }).message).toMatch(/outside the window/i);
+  });
+
+  it('rejects a contact sheet grid larger than the endpoint accepts', async () => {
+    configureVision();
+    const sheet = { columns: 10, rows: 10, tileTimestamps: [1_000] };
+    const response = await analyzeFrame(
+      frameRequest({ frames: [{ ...frame, timestamp: 1_000, sheet }] }),
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { message: string }).message).toMatch(/layout/i);
+  });
+
+  it('rejects a contact sheet with more tiles than its grid', async () => {
+    configureVision();
+    const sheet = { columns: 1, rows: 1, tileTimestamps: [1_000, 1_200] };
+    const response = await analyzeFrame(
+      frameRequest({ frames: [{ ...frame, timestamp: 1_000, sheet }] }),
+    );
+    expect(response.status).toBe(400);
+  });
+
   it('rejects an oversized frame before decoding it', async () => {
     configureVision();
     const response = await analyzeFrame(

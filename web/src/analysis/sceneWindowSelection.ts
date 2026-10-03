@@ -1,10 +1,44 @@
-const SHORT_MEDIA_MS = 5 * 60_000;
+export const SHORT_MEDIA_MS = 5 * 60_000;
 const MAX_CAPTURE_WINDOWS = 72;
+/** Ceiling on vision requests for one short file, however it is configured. */
+export const SHORT_MEDIA_MAX_REQUESTS = 48;
 
 export interface SceneWindowCandidate {
   start: number;
   end: number;
   importance: number;
+}
+
+/**
+ * Scales the vision request budget with the length of short media.
+ *
+ * A fixed budget treats a two-minute clip like a feature film: twelve requests
+ * spread over two minutes leave most of the action unseen. For short media the
+ * budget instead grows until `coverage` of the file can be described, one
+ * contact sheet of `windowSpanMs` per request, capped at
+ * `SHORT_MEDIA_MAX_REQUESTS`. It never drops below the configured base, and
+ * long media keeps the base unchanged.
+ */
+export function sceneRequestBudget(
+  baseBudget: number,
+  durationMs: number,
+  windowSpanMs: number,
+  coverage: number,
+): number {
+  if (!Number.isFinite(baseBudget) || baseBudget <= 0) return 0;
+  const base = Math.floor(baseBudget);
+  if (
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0 ||
+    durationMs > SHORT_MEDIA_MS ||
+    !Number.isFinite(windowSpanMs) ||
+    windowSpanMs <= 0 ||
+    !(coverage > 0)
+  ) {
+    return base;
+  }
+  const covering = Math.ceil((durationMs * Math.min(coverage, 1)) / windowSpanMs);
+  return Math.max(base, Math.min(SHORT_MEDIA_MAX_REQUESTS, covering));
 }
 
 /**

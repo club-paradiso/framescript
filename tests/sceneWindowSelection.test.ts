@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SHORT_MEDIA_MAX_REQUESTS,
   preferredSceneCaptureBudget,
+  sceneRequestBudget,
   selectSceneWindowsForAnalysis,
 } from '../web/src/analysis/sceneWindowSelection';
 
@@ -23,6 +25,38 @@ describe('scene-window capture budget', () => {
 
   it('keeps long-media capture bounded for mobile memory', () => {
     expect(preferredSceneCaptureBudget(12, 3 * 60 * 60_000)).toBeLessThanOrEqual(72);
+  });
+});
+
+describe('scene request budget', () => {
+  it('covers a short clip end to end with four-second contact sheets', () => {
+    // A 2m16s clip: twelve requests would leave most of it undescribed.
+    expect(sceneRequestBudget(12, 136_470, 4_000, 1)).toBe(35);
+  });
+
+  it('covers half of a short clip at the lighter depth', () => {
+    expect(sceneRequestBudget(6, 136_470, 4_000, 0.5)).toBe(18);
+  });
+
+  it('never drops below the configured base for a very short clip', () => {
+    expect(sceneRequestBudget(6, 5_000, 4_000, 1)).toBe(6);
+  });
+
+  it('caps short media at a hard ceiling', () => {
+    expect(sceneRequestBudget(12, 299_000, 1_000, 1)).toBe(SHORT_MEDIA_MAX_REQUESTS);
+  });
+
+  it('leaves long media at the configured base', () => {
+    expect(sceneRequestBudget(12, 45 * 60_000, 4_000, 1)).toBe(12);
+  });
+
+  it('stays disabled when scene understanding is off', () => {
+    expect(sceneRequestBudget(0, 136_470, 4_000, 1)).toBe(0);
+  });
+
+  it('keeps the capture pool large enough for a fully covered short clip', () => {
+    const requests = sceneRequestBudget(12, 136_470, 4_000, 1);
+    expect(preferredSceneCaptureBudget(requests, 136_470)).toBeGreaterThanOrEqual(requests);
   });
 });
 

@@ -27,6 +27,7 @@ import { AnthropicVisionProvider } from '../ai/providers/anthropic';
 import { OpenAiCompatibleAsrProvider } from '../ai/providers/openaiCompatible';
 import type { SpeechRecognitionProvider, VisionAnalysisProvider, VisionFrame } from '../ai/types';
 import type { DeepAnalysisRequest } from '../temporal/TemporalScanner';
+import { RecentWindowContext } from '../ai/windowContext';
 
 const nextId = createIdFactory('deep');
 
@@ -73,6 +74,12 @@ class OffscreenController {
   #fidelity: AnalysisFidelity = 'detailed';
   #statsHandle: ReturnType<typeof setInterval> | null = null;
   #visionProvider: VisionAnalysisProvider = new LocalHeuristicVisionProvider();
+  /**
+   * Recent dialogue and sound evidence, so a vision window is described with
+   * the words spoken over it. Audio evidence is recorded as this document emits
+   * it; subtitle cues arrive from the service worker.
+   */
+  #context = new RecentWindowContext();
 
   async handle(message: WorkerToOffscreen): Promise<unknown> {
     switch (message.type) {
@@ -97,6 +104,9 @@ class OffscreenController {
         return { ok: true };
       case 'offscreen/configure':
         this.#fidelity = message.payload.fidelity;
+        return { ok: true };
+      case 'offscreen/context-evidence':
+        this.#context.record(message.payload.events);
         return { ok: true };
       default:
         return undefined;
@@ -148,7 +158,10 @@ class OffscreenController {
       const asrProvider = this.#buildAsrProvider();
       this.#audio = new AudioPipeline({
         clock: this.#clock,
-        emit: (events) => this.#batcher.push(events),
+        emit: (events) => {
+          this.#context.record(events);
+          this.#batcher.push(events);
+        },
         ...(asrProvider ? { asrProvider } : {}),
         enableSoundEvents: payload.sources.soundEvents !== false,
       });
@@ -236,6 +249,7 @@ class OffscreenController {
     for (const track of this.#stream?.getTracks() ?? []) track.stop();
     this.#stream = null;
     this.#clock.reset();
+    this.#context.clear();
   }
 
   /**
@@ -306,8 +320,7 @@ class OffscreenController {
         end,
         frames,
         metrics: request.metrics,
-        dialogue: [],
-        soundEvents: [],
+        ...this.#context.forWindow(start, end),
         knownCharacters: [],
         ...(request.textLikely && this.#ocrAvailable() ? { requestOcr: true } : {}),
       },

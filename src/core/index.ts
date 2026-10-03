@@ -212,6 +212,12 @@ export {
 } from '../ai/evidenceMapping';
 export type { TranscriptMappingOptions, VisionMappingOptions } from '../ai/evidenceMapping';
 export {
+  DIALOGUE_LEAD_IN_MS,
+  RecentWindowContext,
+  dialogueInWindow,
+  soundsInWindow,
+} from '../ai/windowContext';
+export {
   MAX_RETRY_AFTER_SECONDS,
   classifyHttpFailure,
   isAbort,
